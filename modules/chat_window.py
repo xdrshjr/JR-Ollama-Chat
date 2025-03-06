@@ -128,6 +128,8 @@ class ChatWindow(QMainWindow):
                 box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
             }
         """)
+        # 添加这一行以确保文本自动换行
+        self.chat_history.setLineWrapMode(QTextEdit.WidgetWidth)
         chat_input_layout.addWidget(self.chat_history, 1)  # 分配更多空间给聊天历史
 
         # 用户输入区域
@@ -316,7 +318,8 @@ class ChatWindow(QMainWindow):
 
         # 替换为更新的内容（不做任何格式化处理）
         cursor.removeSelectedText()
-        cursor.insertHtml(f'<div style="color:#e0e0e0;"><b>AI助手:</b> {self.current_response}</div>')
+        cursor.insertHtml(
+            f'<div style="color:#e0e0e0; word-wrap: break-word; max-width: 100%;"><b>AI助手:</b> {self.current_response}</div>')
 
         # 滚动到底部
         cursor.movePosition(QTextCursor.End)
@@ -347,12 +350,12 @@ class ChatWindow(QMainWindow):
             # 处理实际回答中的格式
             formatted_response = self.format_markdown_and_code(actual_response)
 
-            # 构建最终显示内容
+            # 构建最终显示内容，添加自动换行
             final_display = f'''
-            <div style="color:#a0a0a0; font-size:12px; background-color:#333333; padding:5px; border-radius:5px; margin-bottom:10px;">
+            <div style="color:#a0a0a0; font-size:12px; background-color:#333333; padding:5px; border-radius:5px; margin-bottom:10px; word-wrap: break-word; max-width: 100%;">
                 <i>思考过程:</i><br>{think_content}
             </div>
-            <div style="color:#e0e0e0; margin-top:14px;">
+            <div style="color:#e0e0e0; margin-top:14px; word-wrap: break-word; max-width: 100%;">
                 {formatted_response}
             </div>
             '''
@@ -361,15 +364,9 @@ class ChatWindow(QMainWindow):
             formatted_response = self.format_markdown_and_code(self.current_response)
             final_display = formatted_response
 
-        # 更新聊天窗口显示
-        cursor.insertHtml(f'<div style="color:#e0e0e0;"><b>AI助手:</b> {final_display}</div>')
-
-        # 添加AI回复到消息历史（存储原始内容）
-        self.messages.append({"role": "assistant", "content": self.current_response})
-
-        # 禁用暂停按钮
-        self.stop_button.setEnabled(False)
-        self.stop_button.setText("暂停")
+        # 更新聊天窗口显示，确保正确换行
+        cursor.insertHtml(
+            f'<div style="color:#e0e0e0; word-wrap: break-word; max-width: 100%;"><b>AI助手:</b> {final_display}</div>')
 
     def format_markdown_and_code(self, text):
         """格式化文本中的Markdown和代码片段"""
