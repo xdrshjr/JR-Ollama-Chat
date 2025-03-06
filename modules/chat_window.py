@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QTextEdit, QLineEdit,
                              QPushButton, QVBoxLayout, QHBoxLayout, QWidget,
                              QLabel, QComboBox, QSlider, QSplitter)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QFont, QTextCursor
+from PyQt5.QtGui import QFont, QTextCursor, QIcon
 
 from modules.ollama_client import OllamaClient
 
@@ -60,6 +60,7 @@ class ChatWindow(QMainWindow):
 
     def initUI(self):
         self.setWindowTitle('Ollama 本地聊天')
+        self.setWindowIcon(QIcon("imgs/crow.png"))
         self.setGeometry(100, 100, 1366, 768)  # 修改为1024*768
 
         # 创建主布局
@@ -94,7 +95,7 @@ class ChatWindow(QMainWindow):
         settings_layout.addWidget(QLabel("最大Token:"))
         self.token_combo = QComboBox()
         self.token_combo.addItems(["1024", "2048", "4096", "8192"])
-        self.token_combo.setCurrentIndex(1)  # 默认2048
+        self.token_combo.setCurrentIndex(2)  # 默认2048
         settings_layout.addWidget(self.token_combo)
 
         main_layout.addLayout(settings_layout)
@@ -106,13 +107,27 @@ class ChatWindow(QMainWindow):
         self.chat_history = QTextEdit()
         self.chat_history.setReadOnly(True)
         self.chat_history.setFont(QFont("Arial", 10))
+        self.chat_history.setStyleSheet("""
+            QTextEdit {
+                background-color: #ffffff;
+                border: 1px solid #e0e0e0;
+                box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+            }
+        """)
         chat_input_layout.addWidget(self.chat_history, 1)  # 分配更多空间给聊天历史
 
         # 用户输入区域
         input_layout = QHBoxLayout()
         self.user_input = QTextEdit()
-        self.user_input.setFixedHeight(60)
+        self.user_input.setFixedHeight(100)
         self.user_input.setFont(QFont("Arial", 10))
+        self.user_input.setPlaceholderText("在此输入您的问题...")
+        self.user_input.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #e0e0e0;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+        """)
         self.user_input.installEventFilter(self)  # 安装事件过滤器
 
         button_layout = QVBoxLayout()
@@ -148,52 +163,53 @@ class ChatWindow(QMainWindow):
 
         # 设置样式表
         self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f8f9fa;
+            QMainWindow, QWidget {
+                background-color: #f5f5f5;
             }
             QTextEdit {
-                border: 1px solid #dee2e6;
-                border-radius: 6px;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
                 background-color: white;
-                padding: 8px;
+                padding: 10px;
                 font-family: 'Segoe UI', Arial, sans-serif;
             }
             QPushButton {
-                background-color: #0d6efd;
+                background-color: #4a90e2;
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
+                border-radius: 6px;
+                padding: 10px 16px;
                 min-width: 80px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #0b5ed7;
+                background-color: #3a80d2;
             }
             QPushButton:disabled {
-                background-color: #6c757d;
+                background-color: #9eb8d6;
             }
             QComboBox, QLineEdit {
-                border: 1px solid #ced4da;
-                border-radius: 4px;
-                padding: 6px;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                padding: 8px;
                 background-color: white;
             }
             QSlider::groove:horizontal {
-                border: 1px solid #ced4da;
+                border: none;
                 height: 8px;
-                background: #e9ecef;
+                background: #e0e0e0;
                 border-radius: 4px;
             }
             QSlider::handle:horizontal {
-                background: #0d6efd;
-                border: 1px solid #0d6efd;
+                background: #4a90e2;
+                border: none;
                 width: 18px;
                 margin: -5px 0;
                 border-radius: 9px;
             }
             QLabel {
                 font-family: 'Segoe UI', Arial, sans-serif;
+                color: #505050;
             }
         """)
 

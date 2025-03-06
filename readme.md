@@ -48,6 +48,14 @@ python infer_ollama_local.py
 4. Type your message and click "Send" or press Enter
 5. View AI responses in real-time
 
+
+## Trans to exe Package
+```shell
+pip install pyqt5
+pip install auto-py-to-exe
+auto-py-to-exe
+```
+
 ## Project Structure
 
 ```
