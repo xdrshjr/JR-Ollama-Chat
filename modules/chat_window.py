@@ -60,7 +60,7 @@ class ChatWindow(QMainWindow):
 
     def initUI(self):
         self.setWindowTitle('Ollama 本地聊天')
-        self.setGeometry(100, 100, 1024, 768)  # 修改为1024*768
+        self.setGeometry(100, 100, 1366, 768)  # 修改为1024*768
 
         # 创建主布局
         main_layout = QVBoxLayout()
@@ -308,7 +308,7 @@ class ChatWindow(QMainWindow):
 
             # 构建最终显示内容 - 思考过程小字体灰色，实际回答正常大小绿色
             final_display = f'''
-            <div style="color:#888; font-size:10px; background-color:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:10px;">
+            <div style="color:#888; font-size:16px; background-color:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:10px;">
                 <i>思考过程:</i><br>{think_content}
             </div>
             <div style="color:green; margin-top:10px;">
