@@ -287,11 +287,17 @@ class ChatWindow(QMainWindow):
     @pyqtSlot()
     def complete_response(self):
         # 响应完成，处理最终格式并更新消息历史
-        print(self.current_response)
+        # print(self.current_response)
         # 处理思考过程与最终回答的区分
         import re
         think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL)
         think_match = think_pattern.search(self.current_response)
+
+        # 找到最后一个AI回复并准备更新
+        cursor = self.chat_history.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
+        cursor.removeSelectedText()
 
         # 创建最终要展示的内容
         if think_match:
@@ -305,32 +311,20 @@ class ChatWindow(QMainWindow):
             <div style="color:#888; font-size:10px; background-color:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:10px;">
                 <i>思考过程:</i><br>{think_content}
             </div>
-            <div style="color:green; font-size:14px; margin-top:10px;">
+            <div style="color:green; margin-top:10px;">
                 {actual_response}
             </div>
             '''
         else:
             # 没有思考过程，直接显示回答
-            final_display = f'<div style="color:green;">{self.current_response}</div>'
+            final_display = self.current_response
 
         # 更新聊天窗口显示
-        cursor = self.chat_history.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        cursor.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
-        cursor.removeSelectedText()
-        cursor.insertHtml(f'<div><b>AI助手:</b> {final_display}</div>')
+        cursor.insertHtml(f'<div style="color:green;"><b>AI助手:</b> {final_display}</div>')
 
         # 添加AI回复到消息历史（存储原始内容）
         self.messages.append({"role": "assistant", "content": self.current_response})
 
-        # 禁用暂停按钮
-        self.stop_button.setEnabled(False)
-        self.stop_button.setText("暂停")
-
-    @pyqtSlot()
-    def complete_response(self):
-        # 添加AI回复到消息历史
-        self.messages.append({"role": "assistant", "content": self.current_response})
         # 禁用暂停按钮
         self.stop_button.setEnabled(False)
         self.stop_button.setText("暂停")
