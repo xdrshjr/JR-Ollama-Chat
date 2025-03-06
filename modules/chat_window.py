@@ -60,7 +60,7 @@ class ChatWindow(QMainWindow):
 
     def initUI(self):
         self.setWindowTitle('Ollama 本地聊天')
-        self.setWindowIcon(QIcon("imgs/crow.png"))
+        self.setWindowIcon(QIcon("./imgs/crow_TqT_icon.ico"))
         self.setGeometry(100, 100, 1366, 768)  # 修改为1024*768
 
         # 创建主布局
