@@ -352,21 +352,28 @@ class ChatWindow(QMainWindow):
 
             # 构建最终显示内容，添加自动换行
             final_display = f'''
-            <div style="color:#a0a0a0; font-size:12px; background-color:#333333; padding:5px; border-radius:5px; margin-bottom:10px; word-wrap: break-word; max-width: 100%;">
+            <div style="color:#a0a0a0; font-size:18px; background-color:#333333; padding:5px; border-radius:5px; margin-bottom:10px; word-wrap: break-word; max-width: 100%;">
                 <i>思考过程:</i><br>{think_content}
             </div>
             <div style="color:#e0e0e0; margin-top:14px; word-wrap: break-word; max-width: 100%;">
                 {formatted_response}
             </div>
             '''
+
+            # 保存应该是实际回答，而不是带思考过程的完整内容
+            response_for_history = actual_response
         else:
             # 没有思考过程，直接显示格式化后的回答
             formatted_response = self.format_markdown_and_code(self.current_response)
             final_display = formatted_response
+            response_for_history = self.current_response
 
         # 更新聊天窗口显示，确保正确换行
         cursor.insertHtml(
             f'<div style="color:#e0e0e0; word-wrap: break-word; max-width: 100%;"><b>AI助手:</b> {final_display}</div>')
+
+        # 添加模型的回答到历史消息列表中 - 这是解决问题的关键
+        self.messages.append({"role": "assistant", "content": response_for_history})
 
     def format_markdown_and_code(self, text):
         """格式化文本中的Markdown和代码片段"""
