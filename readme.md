@@ -55,6 +55,7 @@ pip install pyqt5
 pip install auto-py-to-exe
 auto-py-to-exe
 ```
+Remember to select the icon when packing
 
 ## Project Structure
 

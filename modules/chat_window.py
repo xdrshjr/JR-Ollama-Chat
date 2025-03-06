@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import time
@@ -9,6 +10,17 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QFont, QTextCursor, QIcon
 
 from modules.ollama_client import OllamaClient
+
+
+def resource_path(relative_path):
+    """ 获取资源的绝对路径，适用于开发环境和PyInstaller打包后的环境 """
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller 创建了临时文件夹，将路径存储在 _MEIPASS 中
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 
 class ChatThread(QThread):
@@ -60,7 +72,7 @@ class ChatWindow(QMainWindow):
 
     def initUI(self):
         self.setWindowTitle('Ollama 本地聊天')
-        self.setWindowIcon(QIcon("./imgs/crow_TqT_icon.ico"))
+        self.setWindowIcon(QIcon(resource_path("imgs/crow_TqT_icon.ico")))
         self.setGeometry(100, 100, 1366, 768)  # 修改为1024*768
 
         # 创建主布局
