@@ -122,9 +122,10 @@ class ChatWindow(QMainWindow):
         self.chat_history.setFont(QFont("Arial", 10))
         self.chat_history.setStyleSheet("""
             QTextEdit {
-                background-color: #ffffff;
-                border: 1px solid #e0e0e0;
-                box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+                background-color: #1e1e1e;  /* 更深的灰黑色 */
+                color: #e0e0e0;
+                border: 1px solid #3a3a3a;
+                box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
             }
         """)
         chat_input_layout.addWidget(self.chat_history, 1)  # 分配更多空间给聊天历史
@@ -174,15 +175,17 @@ class ChatWindow(QMainWindow):
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
 
-        # 设置样式表
+        # 设置样式表 - 修改为更深的灰黑色主题
         self.setStyleSheet("""
             QMainWindow, QWidget {
-                background-color: #f5f5f5;
+                background-color: #1e1e1e;
+                color: #e0e0e0;
             }
             QTextEdit {
-                border: 1px solid #e0e0e0;
+                border: 1px solid #3a3a3a;
                 border-radius: 8px;
-                background-color: white;
+                background-color: #2d2d2d;
+                color: #e0e0e0;
                 padding: 10px;
                 font-family: 'Segoe UI', Arial, sans-serif;
             }
@@ -199,18 +202,24 @@ class ChatWindow(QMainWindow):
                 background-color: #3a80d2;
             }
             QPushButton:disabled {
-                background-color: #9eb8d6;
+                background-color: #555555;
             }
             QComboBox, QLineEdit {
-                border: 1px solid #e0e0e0;
+                border: 1px solid #444444;
                 border-radius: 6px;
                 padding: 8px;
-                background-color: white;
+                background-color: #333333;
+                color: #e0e0e0;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #333333;
+                color: #e0e0e0;
+                selection-background-color: #4a90e2;
             }
             QSlider::groove:horizontal {
                 border: none;
                 height: 8px;
-                background: #e0e0e0;
+                background: #444444;
                 border-radius: 4px;
             }
             QSlider::handle:horizontal {
@@ -222,14 +231,14 @@ class ChatWindow(QMainWindow):
             }
             QLabel {
                 font-family: 'Segoe UI', Arial, sans-serif;
-                color: #505050;
+                color: #c0c0c0;
             }
         """)
 
     def clear_context(self):
         # 只保留系统提示，不清空聊天界面
         self.messages = [{"role": "system", "content": "你是一个有用的AI助手。"}]
-        self.chat_history.append('<div style="color:#888;"><i>--- 上下文已清除，但对话历史保留 ---</i></div>')
+        self.chat_history.append('<div style="color:#808080;"><i>--- 上下文已清除，但对话历史保留 ---</i></div>')
 
     # 添加控制方法
     def toggle_generation(self):
@@ -263,15 +272,15 @@ class ChatWindow(QMainWindow):
         # 更新服务器地址
         self.client.base_url = self.server_input.text().strip()
 
-        # 添加用户消息到历史
-        self.chat_history.append(f'<div style="color:blue;"><b>你:</b> {user_text}</div>')
+        # 添加用户消息到历史 - 修改为浅蓝色
+        self.chat_history.append(f'<div style="color:#7ebeff;"><b>你:</b> {user_text}</div>')
         self.messages.append({"role": "user", "content": user_text})
 
         # 清空输入框
         self.user_input.clear()
 
         # 显示思考中
-        self.chat_history.append('<div style="color:green;"><b>AI助手:</b> </div>')
+        self.chat_history.append('<div style="color:#e0e0e0;"><b>AI助手:</b> </div>')
         self.current_response = ""
 
         # 准备参数
@@ -307,7 +316,7 @@ class ChatWindow(QMainWindow):
 
         # 替换为更新的内容（不做任何格式化处理）
         cursor.removeSelectedText()
-        cursor.insertHtml(f'<div style="color:green;"><b>AI助手:</b> {self.current_response}</div>')
+        cursor.insertHtml(f'<div style="color:#e0e0e0;"><b>AI助手:</b> {self.current_response}</div>')
 
         # 滚动到底部
         cursor.movePosition(QTextCursor.End)
@@ -340,10 +349,10 @@ class ChatWindow(QMainWindow):
 
             # 构建最终显示内容
             final_display = f'''
-            <div style="color:#888; font-size:12px; background-color:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:10px;">
+            <div style="color:#a0a0a0; font-size:12px; background-color:#333333; padding:5px; border-radius:5px; margin-bottom:10px;">
                 <i>思考过程:</i><br>{think_content}
             </div>
-            <div style="color:green; margin-top:14px;">
+            <div style="color:#e0e0e0; margin-top:14px;">
                 {formatted_response}
             </div>
             '''
@@ -353,7 +362,7 @@ class ChatWindow(QMainWindow):
             final_display = formatted_response
 
         # 更新聊天窗口显示
-        cursor.insertHtml(f'<div style="color:green;"><b>AI助手:</b> {final_display}</div>')
+        cursor.insertHtml(f'<div style="color:#e0e0e0;"><b>AI助手:</b> {final_display}</div>')
 
         # 添加AI回复到消息历史（存储原始内容）
         self.messages.append({"role": "assistant", "content": self.current_response})
@@ -387,11 +396,14 @@ class ChatWindow(QMainWindow):
 
             placeholder = f"__CODE_BLOCK_{len(code_blocks)}__"
 
-            # 创建代码块HTML，将整个内容作为代码处理
+            # 处理代码高亮
+            highlighted_code = self.syntax_highlight(code_content, language) if language else code_content.replace("<",
+                                                                                                                   "&lt;").replace(
+                ">", "&gt;")
+
+            # 创建代码块HTML，使用统一黑色背景
             html = f'''<div style="background-color: #282c34; border-radius: 4px; margin: 8px 0; overflow: auto;">
-    <pre style="margin: 0; padding: 8px; white-space: pre; font-family: 'Source Code Pro', Consolas, 'Courier New', monospace; line-height: 1.4; overflow-x: auto; color: #abb2bf;">
-    {code_content.replace("<", "&lt;").replace(">", "&gt;")}
-    </pre>
+    <pre style="margin: 0; padding: 10px; font-family: 'Source Code Pro', Consolas, 'Courier New', monospace; line-height: 1.5; overflow-x: auto; white-space: pre; color: #abb2bf;">{highlighted_code}</pre>
     </div>'''
 
             code_blocks.append(html)
@@ -425,15 +437,18 @@ class ChatWindow(QMainWindow):
         text = text.replace('\n', '<br>')
 
         # 处理其他Markdown格式
-        # 处理标题
+        # 处理标题 - 修改为白色
         text = re.sub(r'(#{1,6})\s+(.*?)(?:<br>|$)',
                       lambda
-                          m: f'<h{len(m.group(1))} style="font-size: {max(18 - len(m.group(1)) * 2, 12)}px; font-weight: bold; margin: 10px 0;">{m.group(2)}</h{len(m.group(1))}>',
+                          m: f'<h{len(m.group(1))} style="font-size: {max(18 - len(m.group(1)) * 2, 12)}px; font-weight: bold; margin: 10px 0; color: #ffffff;">{m.group(2)}</h{len(m.group(1))}>',
                       text)
 
-        # 处理粗体和斜体
-        text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
-        text = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', text)
+        # 处理粗体和斜体 - 确保显示为白色
+        text = re.sub(r'\*\*([^*]+)\*\*', r'<strong style="color: #ffffff;">\1</strong>', text)
+        text = re.sub(r'\*([^*]+)\*', r'<em style="color: #ffffff;">\1</em>', text)
+
+        # 确保普通文本也是白色
+        text = f'<span style="color: #e0e0e0;">{text}</span>'
 
         # 最后，恢复代码块和行内代码
         for i, html in enumerate(code_blocks):
@@ -445,40 +460,90 @@ class ChatWindow(QMainWindow):
         return text
 
     def syntax_highlight(self, code, language):
-        """为代码添加基本的语法高亮"""
+        """为代码添加语法高亮"""
         code = code.replace("<", "&lt;").replace(">", "&gt;")
 
+        # 通用关键字和颜色定义
+        colors = {
+            'keyword': '#c678dd',  # 关键字为紫色
+            'string': '#98c379',  # 字符串为绿色
+            'number': '#d19a66',  # 数字为橙色
+            'comment': '#5c6370',  # 注释为灰色
+            'function': '#61afef',  # 函数为蓝色
+            'constant': '#e06c75',  # 常量为红色
+            'operator': '#56b6c2',  # 运算符为青色
+            'property': '#e6c07b',  # 属性为黄色
+        }
+
         if language.lower() in ['python', 'py']:
-            # 添加Python语法高亮
+            # Python高亮规则
             keywords = ['def', 'class', 'if', 'else', 'elif', 'for', 'while', 'try', 'except',
                         'import', 'from', 'as', 'return', 'yield', 'with', 'lambda', 'not', 'in',
-                        'and', 'or', 'True', 'False', 'None', 'self']
+                        'and', 'or', 'True', 'False', 'None', 'self', 'pass', 'break', 'continue']
 
             for keyword in keywords:
-                # 确保只匹配完整单词
                 code = re.sub(r'\b(' + keyword + r')\b',
-                              r'<span style="color: #c678dd;">\1</span>', code)
+                              f'<span style="color: {colors["keyword"]}">\\1</span>', code)
 
-            # 字符串高亮
+            # 字符串高亮 (单引号和双引号)
             code = re.sub(r'(\'[^\']*\'|\"[^\"]*\")',
-                          r'<span style="color: #98c379;">\1</span>', code)
+                          f'<span style="color: {colors["string"]}">\\1</span>', code)
 
             # 数字高亮
-            code = re.sub(r'\b(\d+)\b', r'<span style="color: #d19a66;">\1</span>', code)
+            code = re.sub(r'\b(\d+\.?\d*)\b',
+                          f'<span style="color: {colors["number"]}">\\1</span>', code)
 
             # 注释高亮
-            code = re.sub(r'(#.*)$', r'<span style="color: #5c6370;">\1</span>', code, flags=re.MULTILINE)
+            code = re.sub(r'(#.*?)(?=<br>|$)',
+                          f'<span style="color: {colors["comment"]}">\\1</span>', code)
 
             # 函数调用
             code = re.sub(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\(',
-                          r'<span style="color: #61afef;">\1</span>(', code)
+                          f'<span style="color: {colors["function"]}">\\1</span>(', code)
+
+            # 装饰器
+            code = re.sub(r'(@[a-zA-Z_][a-zA-Z0-9_]*)',
+                          f'<span style="color: {colors["property"]}">\\1</span>', code)
 
         elif language.lower() in ['javascript', 'js']:
-            # JavaScript语法高亮
-            # 类似地实现JavaScript的语法高亮规则
-            pass
+            # JavaScript高亮规则
+            keywords = ['var', 'let', 'const', 'function', 'return', 'if', 'else', 'for', 'while',
+                        'class', 'new', 'this', 'import', 'export', 'from', 'try', 'catch', 'finally',
+                        'switch', 'case', 'break', 'continue', 'default', 'null', 'undefined', 'true', 'false']
 
-        # 可以根据需要添加更多语言的语法高亮规则
+            for keyword in keywords:
+                code = re.sub(r'\b(' + keyword + r')\b',
+                              f'<span style="color: {colors["keyword"]}">\\1</span>', code)
+
+            # 字符串高亮
+            code = re.sub(r'(\'[^\']*\'|\"[^\"]*\"|`[^`]*`)',
+                          f'<span style="color: {colors["string"]}">\\1</span>', code)
+
+            # 数字高亮
+            code = re.sub(r'\b(\d+\.?\d*)\b',
+                          f'<span style="color: {colors["number"]}">\\1</span>', code)
+
+            # 注释高亮
+            code = re.sub(r'(//.*?)(?=<br>|$)|(/\*.*?\*/)',
+                          f'<span style="color: {colors["comment"]}">\\1</span>', code)
+
+            # 函数调用
+            code = re.sub(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\(',
+                          f'<span style="color: {colors["function"]}">\\1</span>(', code)
+
+        elif language.lower() in ['html']:
+            # HTML高亮规则
+            # 标签
+            code = re.sub(r'(&lt;/?[a-z][a-z0-9]*(?:\s+[a-z0-9\-]+(?:=(?:\".*?\"|\'.*?\'|[^\s&gt;]*))?)*\s*/?\s*&gt;)',
+                          f'<span style="color: {colors["keyword"]}">\\1</span>', code)
+
+            # 属性
+            code = re.sub(r'(\s+)([a-z0-9\-]+)(=)',
+                          f'\\1<span style="color: {colors["property"]}">\\2</span>\\3', code)
+
+            # 属性值
+            code = re.sub(r'(=)(\".*?\"|\'.*?\')',
+                          f'\\1<span style="color: {colors["string"]}">\\2</span>', code)
 
         return code
 
