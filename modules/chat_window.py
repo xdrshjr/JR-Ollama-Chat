@@ -324,10 +324,10 @@ class ChatWindow(QMainWindow):
 
             # 构建最终显示内容 - 思考过程小字体灰色，实际回答正常大小绿色
             final_display = f'''
-            <div style="color:#888; font-size:16px; background-color:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:10px;">
+            <div style="color:#888; font-size:12px; background-color:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:10px;">
                 <i>思考过程:</i><br>{think_content}
             </div>
-            <div style="color:green; margin-top:10px;">
+            <div style="color:green; margin-top:14px;">
                 {actual_response}
             </div>
             '''
