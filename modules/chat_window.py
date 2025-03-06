@@ -352,7 +352,7 @@ class ChatWindow(QMainWindow):
 
             # 构建最终显示内容，添加自动换行
             final_display = f'''
-            <div style="color:#a0a0a0; font-size:18px; background-color:#333333; padding:5px; border-radius:5px; margin-bottom:10px; word-wrap: break-word; max-width: 100%;">
+            <div style="color:#a0a0a0; font-size:15px; background-color:#333333; padding:5px; border-radius:5px; margin-bottom:10px; word-wrap: break-word; max-width: 100%;">
                 <i>思考过程:</i><br>{think_content}
             </div>
             <div style="color:#e0e0e0; margin-top:14px; word-wrap: break-word; max-width: 100%;">
