@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import json
 import time
@@ -369,36 +370,61 @@ class ChatWindow(QMainWindow):
         code_blocks = []
 
         def save_code_block(match):
-            language = match.group(1) or ""
-            code = match.group(2)
+            # 获取整个匹配内容以保留原始格式
+            full_match = match.group(0)
+
+            # 尝试提取语言标识符和代码内容
+            lines = full_match.strip().split('\n')
+
+            if len(lines) >= 2 and lines[0].startswith('```'):
+                # 如果是标准格式的代码块
+                language = lines[0][3:].strip()
+                code_content = '\n'.join(lines[1:-1])  # 除去首尾行
+            else:
+                # 如果是不标准的格式（如只有语言标识符没有```）
+                language = lines[0].strip()
+                code_content = '\n'.join(lines[1:])
+
             placeholder = f"__CODE_BLOCK_{len(code_blocks)}__"
 
-            # 创建HTML代码块，不包含任何<br>标签
-            html = f'''<div style="background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; margin: 8px 0; overflow: auto;">
-    <div style="background-color: #eee; padding: 4px 8px; color: #666; font-family: monospace; font-size: 90%; border-bottom: 1px solid #ddd;">{language}</div>
-    <pre style="margin: 0; padding: 8px; white-space: pre; font-family: Consolas, 'Courier New', monospace; line-height: 1.4; overflow-x: auto;">{code.replace("<", "&lt;").replace(">", "&gt;")}</pre>
+            # 创建代码块HTML，将整个内容作为代码处理
+            html = f'''<div style="background-color: #282c34; border-radius: 4px; margin: 8px 0; overflow: auto;">
+    <pre style="margin: 0; padding: 8px; white-space: pre; font-family: 'Source Code Pro', Consolas, 'Courier New', monospace; line-height: 1.4; overflow-x: auto; color: #abb2bf;">
+    {code_content.replace("<", "&lt;").replace(">", "&gt;")}
+    </pre>
     </div>'''
 
             code_blocks.append(html)
             return placeholder
 
-        # 保存行内代码
+        # 使用更广泛的模式匹配代码块，包括非标准格式
+        # 这个模式会匹配：1) ```语言 代码 ``` 2) 语言名 + 缩进代码
+        code_block_pattern = r'(```\w*[\s\S]*?```|(?:^|\n)(?:python|java|javascript|bash|shell|cmd|cpp|csharp|c\+\+|c#|html|css|php|go|rust|swift|ruby|typescript|ts|js)\s*\n\s{4}.*?(?=\n\S|$))'
+        text = re.sub(code_block_pattern, save_code_block, text, flags=re.MULTILINE | re.DOTALL)
+
+        # 行内代码处理
         inline_codes = []
 
         def save_inline_code(match):
             code = match.group(1)
             placeholder = f"__INLINE_CODE_{len(inline_codes)}__"
-            html = f'<code style="background-color: #f0f0f0; padding: 2px 4px; border-radius: 3px; font-family: monospace;">{code.replace("<", "&lt;").replace(">", "&gt;")}</code>'
+            html = f'<code style="background-color: #2c323c; padding: 2px 4px; border-radius: 3px; font-family: monospace; color: #abb2bf;">{code.replace("<", "&lt;").replace(">", "&gt;")}</code>'
             inline_codes.append(html)
             return placeholder
 
-        # 首先保存代码块和行内代码
-        text = re.sub(r'```(\w*)\s*(.*?)```', save_code_block, text, flags=re.DOTALL)
+        # 处理行内代码
         text = re.sub(r'`([^`]+)`', save_inline_code, text)
 
-        # 接下来处理其他markdown语法，将换行符转换为<br>
+        # 处理连续换行问题
+        text = re.sub(r'\n{2,}', '\n', text)
+
+        # 删除文档末尾的破折号分隔符
+        text = re.sub(r'\n---\s*$', '', text)
+
+        # 将换行符转换为HTML换行
         text = text.replace('\n', '<br>')
 
+        # 处理其他Markdown格式
         # 处理标题
         text = re.sub(r'(#{1,6})\s+(.*?)(?:<br>|$)',
                       lambda
@@ -409,42 +435,6 @@ class ChatWindow(QMainWindow):
         text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
         text = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', text)
 
-        # 处理列表
-        def replace_unordered_list(match):
-            items = match.group(0).strip().split('<br>')
-            result = '<ul style="margin: 10px 0; padding-left: 20px;">'
-            for item in items:
-                if item.strip().startswith(('- ', '* ', '+ ')):
-                    text = item.strip()[2:].strip()
-                    result += f'<li>{text}</li>'
-            result += '</ul>'
-            return result
-
-        def replace_ordered_list(match):
-            items = match.group(0).strip().split('<br>')
-            result = '<ol style="margin: 10px 0; padding-left: 20px;">'
-            for item in items:
-                if re.match(r'^\d+\.\s', item.strip()):
-                    text = re.sub(r'^\d+\.\s', '', item.strip())
-                    result += f'<li>{text}</li>'
-            result += '</ol>'
-            return result
-
-        # 处理引用和链接
-        text = re.sub(r'(?:^|\<br\>)>\s+(.*?)(?:<br>|$)',
-                      r'<blockquote style="border-left: 4px solid #ddd; padding-left: 10px; color: #666; margin: 10px 0;">\1</blockquote>',
-                      text)
-        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)',
-                      r'<a href="\2" style="color: #4a90e2; text-decoration: none;">\1</a>',
-                      text)
-
-        # 处理列表
-        unordered_list_pattern = r'((?:^|\<br\>)(?:[-*+]\s+.+?\<br\>)+)'
-        text = re.sub(unordered_list_pattern, replace_unordered_list, text)
-
-        ordered_list_pattern = r'((?:^|\<br\>)(?:\d+\.\s+.+?\<br\>)+)'
-        text = re.sub(ordered_list_pattern, replace_ordered_list, text)
-
         # 最后，恢复代码块和行内代码
         for i, html in enumerate(code_blocks):
             text = text.replace(f"__CODE_BLOCK_{i}__", html)
@@ -453,6 +443,44 @@ class ChatWindow(QMainWindow):
             text = text.replace(f"__INLINE_CODE_{i}__", html)
 
         return text
+
+    def syntax_highlight(self, code, language):
+        """为代码添加基本的语法高亮"""
+        code = code.replace("<", "&lt;").replace(">", "&gt;")
+
+        if language.lower() in ['python', 'py']:
+            # 添加Python语法高亮
+            keywords = ['def', 'class', 'if', 'else', 'elif', 'for', 'while', 'try', 'except',
+                        'import', 'from', 'as', 'return', 'yield', 'with', 'lambda', 'not', 'in',
+                        'and', 'or', 'True', 'False', 'None', 'self']
+
+            for keyword in keywords:
+                # 确保只匹配完整单词
+                code = re.sub(r'\b(' + keyword + r')\b',
+                              r'<span style="color: #c678dd;">\1</span>', code)
+
+            # 字符串高亮
+            code = re.sub(r'(\'[^\']*\'|\"[^\"]*\")',
+                          r'<span style="color: #98c379;">\1</span>', code)
+
+            # 数字高亮
+            code = re.sub(r'\b(\d+)\b', r'<span style="color: #d19a66;">\1</span>', code)
+
+            # 注释高亮
+            code = re.sub(r'(#.*)$', r'<span style="color: #5c6370;">\1</span>', code, flags=re.MULTILINE)
+
+            # 函数调用
+            code = re.sub(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\(',
+                          r'<span style="color: #61afef;">\1</span>(', code)
+
+        elif language.lower() in ['javascript', 'js']:
+            # JavaScript语法高亮
+            # 类似地实现JavaScript的语法高亮规则
+            pass
+
+        # 可以根据需要添加更多语言的语法高亮规则
+
+        return code
 
     def clear_chat(self):
         # 清空聊天历史
