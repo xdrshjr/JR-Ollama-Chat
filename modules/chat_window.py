@@ -314,9 +314,6 @@ class ChatWindow(QMainWindow):
 
     @pyqtSlot()
     def complete_response(self):
-        # 响应完成，处理最终格式并更新消息历史
-        # print(self.current_response)
-        # 处理思考过程与最终回答的区分
         import re
         think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL)
         think_match = think_pattern.search(self.current_response)
@@ -327,25 +324,32 @@ class ChatWindow(QMainWindow):
         cursor.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
         cursor.removeSelectedText()
 
-        # 创建最终要展示的内容
+        # 获取格式化后的响应文本
         if think_match:
             # 提取思考过程
             think_content = think_match.group(1).strip()
             # 获取思考后的实际回答（移除think标签及其内容）
             actual_response = re.sub(r'<think>.*?</think>', '', self.current_response, flags=re.DOTALL).strip()
 
-            # 构建最终显示内容 - 思考过程小字体灰色，实际回答正常大小绿色
+            # 处理思考过程中的格式
+            think_content = self.format_markdown_and_code(think_content)
+
+            # 处理实际回答中的格式
+            formatted_response = self.format_markdown_and_code(actual_response)
+
+            # 构建最终显示内容
             final_display = f'''
             <div style="color:#888; font-size:12px; background-color:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:10px;">
                 <i>思考过程:</i><br>{think_content}
             </div>
             <div style="color:green; margin-top:14px;">
-                {actual_response}
+                {formatted_response}
             </div>
             '''
         else:
-            # 没有思考过程，直接显示回答
-            final_display = self.current_response
+            # 没有思考过程，直接显示格式化后的回答
+            formatted_response = self.format_markdown_and_code(self.current_response)
+            final_display = formatted_response
 
         # 更新聊天窗口显示
         cursor.insertHtml(f'<div style="color:green;"><b>AI助手:</b> {final_display}</div>')
@@ -356,6 +360,99 @@ class ChatWindow(QMainWindow):
         # 禁用暂停按钮
         self.stop_button.setEnabled(False)
         self.stop_button.setText("暂停")
+
+    def format_markdown_and_code(self, text):
+        """格式化文本中的Markdown和代码片段"""
+        import re
+
+        # 先保存代码块，防止它们被其他规则干扰
+        code_blocks = []
+
+        def save_code_block(match):
+            language = match.group(1) or ""
+            code = match.group(2)
+            placeholder = f"__CODE_BLOCK_{len(code_blocks)}__"
+
+            # 创建HTML代码块，不包含任何<br>标签
+            html = f'''<div style="background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; margin: 8px 0; overflow: auto;">
+    <div style="background-color: #eee; padding: 4px 8px; color: #666; font-family: monospace; font-size: 90%; border-bottom: 1px solid #ddd;">{language}</div>
+    <pre style="margin: 0; padding: 8px; white-space: pre; font-family: Consolas, 'Courier New', monospace; line-height: 1.4; overflow-x: auto;">{code.replace("<", "&lt;").replace(">", "&gt;")}</pre>
+    </div>'''
+
+            code_blocks.append(html)
+            return placeholder
+
+        # 保存行内代码
+        inline_codes = []
+
+        def save_inline_code(match):
+            code = match.group(1)
+            placeholder = f"__INLINE_CODE_{len(inline_codes)}__"
+            html = f'<code style="background-color: #f0f0f0; padding: 2px 4px; border-radius: 3px; font-family: monospace;">{code.replace("<", "&lt;").replace(">", "&gt;")}</code>'
+            inline_codes.append(html)
+            return placeholder
+
+        # 首先保存代码块和行内代码
+        text = re.sub(r'```(\w*)\s*(.*?)```', save_code_block, text, flags=re.DOTALL)
+        text = re.sub(r'`([^`]+)`', save_inline_code, text)
+
+        # 接下来处理其他markdown语法，将换行符转换为<br>
+        text = text.replace('\n', '<br>')
+
+        # 处理标题
+        text = re.sub(r'(#{1,6})\s+(.*?)(?:<br>|$)',
+                      lambda
+                          m: f'<h{len(m.group(1))} style="font-size: {max(18 - len(m.group(1)) * 2, 12)}px; font-weight: bold; margin: 10px 0;">{m.group(2)}</h{len(m.group(1))}>',
+                      text)
+
+        # 处理粗体和斜体
+        text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+        text = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', text)
+
+        # 处理列表
+        def replace_unordered_list(match):
+            items = match.group(0).strip().split('<br>')
+            result = '<ul style="margin: 10px 0; padding-left: 20px;">'
+            for item in items:
+                if item.strip().startswith(('- ', '* ', '+ ')):
+                    text = item.strip()[2:].strip()
+                    result += f'<li>{text}</li>'
+            result += '</ul>'
+            return result
+
+        def replace_ordered_list(match):
+            items = match.group(0).strip().split('<br>')
+            result = '<ol style="margin: 10px 0; padding-left: 20px;">'
+            for item in items:
+                if re.match(r'^\d+\.\s', item.strip()):
+                    text = re.sub(r'^\d+\.\s', '', item.strip())
+                    result += f'<li>{text}</li>'
+            result += '</ol>'
+            return result
+
+        # 处理引用和链接
+        text = re.sub(r'(?:^|\<br\>)>\s+(.*?)(?:<br>|$)',
+                      r'<blockquote style="border-left: 4px solid #ddd; padding-left: 10px; color: #666; margin: 10px 0;">\1</blockquote>',
+                      text)
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)',
+                      r'<a href="\2" style="color: #4a90e2; text-decoration: none;">\1</a>',
+                      text)
+
+        # 处理列表
+        unordered_list_pattern = r'((?:^|\<br\>)(?:[-*+]\s+.+?\<br\>)+)'
+        text = re.sub(unordered_list_pattern, replace_unordered_list, text)
+
+        ordered_list_pattern = r'((?:^|\<br\>)(?:\d+\.\s+.+?\<br\>)+)'
+        text = re.sub(ordered_list_pattern, replace_ordered_list, text)
+
+        # 最后，恢复代码块和行内代码
+        for i, html in enumerate(code_blocks):
+            text = text.replace(f"__CODE_BLOCK_{i}__", html)
+
+        for i, html in enumerate(inline_codes):
+            text = text.replace(f"__INLINE_CODE_{i}__", html)
+
+        return text
 
     def clear_chat(self):
         # 清空聊天历史
