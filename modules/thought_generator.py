@@ -26,6 +26,11 @@ class ThoughtGenerator(QThread):
         ]
         self.current_thought = ""  # 当前正在生成的思考内容
 
+    def stop(self):
+        """安全地停止思考线程"""
+        self._stop = True
+        self.wait(1000)  # 等待最多1秒钟
+
     def run(self):
         """开始自主思考过程"""
         iteration = 0

@@ -6,6 +6,7 @@ import time
 import requests
 from langchain.vectorstores import faiss
 
+from modules.chat_thread import ChatThread
 from modules.ollama_memory_manager import OllamaMemoryManager
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTextEdit, QLineEdit,
                              QPushButton, QVBoxLayout, QHBoxLayout, QWidget,
@@ -29,52 +30,6 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
-class ChatThread(QThread):
-    response_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal()
-
-    def __init__(self, client, model, messages, temperature, max_tokens):
-        super().__init__()
-        self.client = client
-        self.model = model
-        self.messages = messages
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self._stop = False
-        # 存储当前正在生成的思考
-        self.current_thinking = ""
-        self.current_thinking_category = ""
-
-    # 在 thought_generator.py 中添加
-    def stop(self):
-        """停止思考进程"""
-        self._stop = True
-        # 等待线程实际终止的辅助方法
-        self.wait(1000)  # 最多等待1秒
-
-    def run(self):
-        try:
-            stream_response = self.client.chat_completion(
-                model=self.model,
-                messages=self.messages,
-                stream=True,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
-            )
-
-            for chunk in stream_response:
-                if self._stop:
-                    break
-                if chunk:
-                    content_delta = chunk["choices"][0]["delta"].get("content", "")
-                    if content_delta:
-                        self.response_signal.emit(content_delta)
-        except Exception as e:
-            self.response_signal.emit(f"\n\n发生错误: {str(e)}")
-        finally:
-            self.finished_signal.emit()
-
-
 class ChatWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -83,7 +38,35 @@ class ChatWindow(QMainWindow):
         self.current_response = ""
         self.is_thinking = False
         self.thought_generator = None
+
+        # 检查记忆目录
+        memory_dir = "memory"
+        import os
+        if os.path.exists(memory_dir) and os.path.isdir(memory_dir):
+            memory_file = os.path.join(memory_dir, "memories.json")
+            if os.path.exists(memory_file):
+                import json
+                try:
+                    with open(memory_file, "r", encoding="utf-8") as f:
+                        memories = json.load(f)
+                    self.has_existing_memories = len(memories) > 0
+                    self.memory_count_startup = len(memories)
+                except:
+                    self.has_existing_memories = False
+                    self.memory_count_startup = 0
+            else:
+                self.has_existing_memories = False
+                self.memory_count_startup = 0
+        else:
+            self.has_existing_memories = False
+            self.memory_count_startup = 0
+
         self.initUI()
+
+        # 如果有现有记忆，显示通知
+        if self.has_existing_memories:
+            self.chat_history.append(
+                f'<div style="color:#808080;"><i>--- 检测到 {self.memory_count_startup} 条已存储的记忆，可勾选"使用记忆"启用 ---</i></div>')
 
     def initUI(self):
         self.setWindowTitle('JR-Ollama Chat')
@@ -141,6 +124,7 @@ class ChatWindow(QMainWindow):
         self.use_memory_cb = QCheckBox("使用记忆")
         self.use_memory_cb.setChecked(False)
         self.use_memory_cb.setStyleSheet("color: #e0e0e0;")
+        self.use_memory_cb.stateChanged.connect(self.toggle_memory_usage)  # 添加事件处理
         memory_layout.addWidget(self.use_memory_cb)
 
         self.memory_status = QLabel("记忆状态: 空闲")
@@ -339,6 +323,25 @@ class ChatWindow(QMainWindow):
             }
         """)
 
+    def closeEvent(self, event):
+        """在窗口关闭时处理线程终止"""
+        print("正在关闭窗口，清理线程...")
+
+        # 停止思考线程
+        if hasattr(self, 'thought_generator') and self.thought_generator:
+            print("正在停止思考线程...")
+            self.thought_generator._stop = True
+            self.thought_generator.wait(1000)
+
+        # 停止聊天线程
+        if hasattr(self, 'chat_thread') and self.chat_thread and self.chat_thread.isRunning():
+            print("正在停止聊天线程...")
+            self.chat_thread._stop = True
+            self.chat_thread.wait(1000)
+
+        print("所有线程已停止，窗口即将关闭")
+        event.accept()
+
     # 添加新的清除所有记忆方法
     def clear_all_memories(self):
         """清空所有存储的记忆"""
@@ -364,10 +367,54 @@ class ChatWindow(QMainWindow):
             if hasattr(self, 'memory_manager') and self.memory_manager:
                 count = len(self.memory_manager.memories)
                 self.memory_count.setText(f"记忆数量: {count}")
+
+                # 如果记忆功能已启用，也更新状态文本
+                if self.use_memory_cb.isChecked():
+                    self.memory_status.setText(f"记忆状态: 已启用 ({count} 条)")
             else:
                 self.memory_count.setText("记忆数量: 0")
         except Exception as e:
             print(f"更新记忆数量出错: {str(e)}")
+
+    def toggle_memory_usage(self, state):
+        """处理记忆使用选项的开关"""
+        try:
+            if state == Qt.Checked:  # 如果勾选了使用记忆
+                # 初始化记忆管理器（如果尚未初始化）
+                if not hasattr(self, 'memory_manager') or self.memory_manager is None:
+                    self.memory_manager = OllamaMemoryManager(self.client)
+
+                    # 初始化记忆检索器
+                    from modules.memory_retriever import MemoryRetriever
+                    self.memory_retriever = MemoryRetriever(self.memory_manager)
+
+                    # 更新嵌入模型
+                    current_embed_model = self.embed_model_combo.currentText()
+                    self.memory_manager.embedding_model = current_embed_model
+
+                    # 更新记忆数量显示
+                    self.update_memory_count()
+
+                    memory_count = len(self.memory_manager.memories) if hasattr(self.memory_manager, 'memories') else 0
+                    if memory_count > 0:
+                        self.chat_history.append(
+                            f'<div style="color:#808080;"><i>--- 已加载 {memory_count} 条记忆 ---</i></div>')
+                    else:
+                        self.chat_history.append(
+                            '<div style="color:#808080;"><i>--- 没有找到已存储的记忆 ---</i></div>')
+
+                self.memory_status.setText(f"记忆状态: 已启用 ({len(self.memory_manager.memories)} 条)")
+            else:
+                # 禁用记忆使用（但不删除记忆）
+                self.memory_status.setText("记忆状态: 已禁用")
+                self.chat_history.append('<div style="color:#808080;"><i>--- 记忆功能已禁用 ---</i></div>')
+        except Exception as e:
+            import traceback
+            error_msg = f"切换记忆状态出错: {str(e)}\n{traceback.format_exc()}"
+            print(error_msg)
+            self.chat_history.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
+            # 出错时取消勾选
+            self.use_memory_cb.setChecked(False)
 
     def toggle_thinking(self):
         """切换思考状态"""
@@ -555,16 +602,19 @@ class ChatWindow(QMainWindow):
         if not user_text:
             return
 
-        # 如果正在思考，先暂停思考并等待其完全停止
         was_thinking = False
         if self.is_thinking and hasattr(self, 'thought_generator') and self.thought_generator:
             was_thinking = True
-            self.thought_generator._stop = True  # 直接设置停止标志
+            self.thought_generator.stop()  # 使用正确的stop方法
+
+            # 等待线程完全停止
+            if self.thought_generator.isRunning():
+                self.thought_generator.wait(1000)  # 最多等待1秒
+
             self.thought_generator = None
             self.is_thinking = False
             self.memory_status.setText("记忆状态: 暂停思考，正在回答问题...")
             self.thinking_display.append('<div style="color:#e07a7a;"><i>思考已暂停，正在回答问题...</i></div>')
-
             # 给线程一点时间完全终止
             QApplication.processEvents()
             time.sleep(0.5)  # 短暂暂停确保资源释放
@@ -576,21 +626,40 @@ class ChatWindow(QMainWindow):
         self.chat_history.append(f'<div style="color:#7ebeff;"><b>你:</b> {user_text}</div>')
 
         # 检查是否使用记忆
-        if self.use_memory_cb.isChecked() and hasattr(self, 'memory_manager') and self.memory_manager.memories:
-            # 使用记忆增强提示
-            from modules.memory_retriever import MemoryRetriever
-            if not hasattr(self, 'memory_retriever') or self.memory_retriever is None:
+        if self.use_memory_cb.isChecked():
+            # 确保记忆管理器已初始化
+            if not hasattr(self, 'memory_manager') or self.memory_manager is None:
+                self.memory_manager = OllamaMemoryManager(self.client)
+                # 初始化记忆检索器
+                from modules.memory_retriever import MemoryRetriever
                 self.memory_retriever = MemoryRetriever(self.memory_manager)
 
-            enhanced_query, memories = self.memory_retriever.enhance_prompt_with_memories(user_text)
+            # 如果记忆管理器存在且有记忆
+            if hasattr(self, 'memory_manager') and self.memory_manager.memories:
+                # 使用记忆增强提示，设置相关性阈值为0.65
+                if not hasattr(self, 'memory_retriever') or self.memory_retriever is None:
+                    self.memory_retriever = MemoryRetriever(self.memory_manager)
 
-            # 如果找到了相关记忆，在聊天历史中显示
-            if memories:
-                memory_info = f"已找到 {len(memories)} 条相关记忆"
-                self.chat_history.append(f'<div style="color:#808080;"><i>--- {memory_info} ---</i></div>')
+                enhanced_query, memories = self.memory_retriever.enhance_prompt_with_memories(user_text,
+                                                                                              top_k=3,
+                                                                                              similarity_threshold=0.65)
 
-            # 使用增强后的查询
-            self.messages.append({"role": "user", "content": enhanced_query})
+                # 如果找到了相关记忆，在聊天历史中显示
+                if memories:
+                    similarities = [f"{memory['similarity']:.2f}" for memory in memories]
+                    memory_info = f"已找到 {len(memories)} 条相关记忆 (相关度: {', '.join(similarities)})"
+                    self.chat_history.append(f'<div style="color:#808080;"><i>--- {memory_info} ---</i></div>')
+                    # 使用增强后的查询
+                    self.messages.append({"role": "user", "content": enhanced_query})
+                else:
+                    # 没有足够相关的记忆，使用原始查询
+                    self.chat_history.append(
+                        '<div style="color:#808080;"><i>--- 未找到足够相关的记忆，使用原始查询 ---</i></div>')
+                    self.messages.append({"role": "user", "content": user_text})
+            else:
+                # 没有记忆，提示用户
+                self.chat_history.append('<div style="color:#808080;"><i>--- 没有可用的记忆，使用原始查询 ---</i></div>')
+                self.messages.append({"role": "user", "content": user_text})
         else:
             # 不使用记忆，直接添加原始消息
             self.messages.append({"role": "user", "content": user_text})
@@ -641,15 +710,14 @@ class ChatWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         if obj == self.user_input and event.type() == event.KeyPress:
-            # 检查是否按下回车键
             if event.key() == Qt.Key_Return:
-                # 如果同时按下Shift键，则插入换行
                 if event.modifiers() & Qt.ShiftModifier:
-                    return False  # 让系统处理这个事件（添加换行）
+                    return False
                 else:
-                    # 没有按Shift，直接发送消息
-                    self.send_message()
-                    return True  # 我们已经处理了这个事件
+                    # 使用QTimer.singleShot延迟调用send_message，避免直接在事件处理中执行
+                    from PyQt5.QtCore import QTimer
+                    QTimer.singleShot(0, self.send_message)
+                    return True
         return super().eventFilter(obj, event)
 
     @pyqtSlot(str)
@@ -673,58 +741,64 @@ class ChatWindow(QMainWindow):
 
     @pyqtSlot()
     def complete_response(self, was_thinking=False):
-        import re
-        think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL)
-        think_match = think_pattern.search(self.current_response)
+        try:
+            import re
+            think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL)
+            think_match = think_pattern.search(self.current_response)
 
-        # 找到最后一个AI回复并准备更新
-        cursor = self.chat_history.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        cursor.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
-        cursor.removeSelectedText()
+            # 找到最后一个AI回复并准备更新
+            cursor = self.chat_history.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
 
-        # 获取格式化后的响应文本
-        if think_match:
-            # 提取思考过程
-            think_content = think_match.group(1).strip()
-            # 获取思考后的实际回答（移除think标签及其内容）
-            actual_response = re.sub(r'<think>.*?</think>', '', self.current_response, flags=re.DOTALL).strip()
+            # 获取格式化后的响应文本
+            if think_match:
+                # 提取思考过程
+                think_content = think_match.group(1).strip()
+                # 获取思考后的实际回答（移除think标签及其内容）
+                actual_response = re.sub(r'<think>.*?</think>', '', self.current_response, flags=re.DOTALL).strip()
 
-            # 处理思考过程中的格式
-            think_content = self.format_markdown_and_code(think_content)
+                # 处理思考过程中的格式
+                think_content = self.format_markdown_and_code(think_content)
 
-            # 处理实际回答中的格式
-            formatted_response = self.format_markdown_and_code(actual_response)
+                # 处理实际回答中的格式
+                formatted_response = self.format_markdown_and_code(actual_response)
 
-            # 构建最终显示内容，添加自动换行
-            final_display = f'''
-            <div style="color:#a0a0a0; font-size:15px; background-color:#333333; padding:5px; border-radius:5px; margin-bottom:10px; word-wrap: break-word; max-width: 100%;">
-                <i>思考过程:</i><br>{think_content}
-            </div>
-            <div style="color:#e0e0e0; margin-top:14px; word-wrap: break-word; max-width: 100%;">
-                {formatted_response}
-            </div>
-            '''
+                # 构建最终显示内容，添加自动换行
+                final_display = f'''
+                <div style="color:#a0a0a0; font-size:15px; background-color:#333333; padding:5px; border-radius:5px; margin-bottom:10px; word-wrap: break-word; max-width: 100%;">
+                    <i>思考过程:</i><br>{think_content}
+                </div>
+                <div style="color:#e0e0e0; margin-top:14px; word-wrap: break-word; max-width: 100%;">
+                    {formatted_response}
+                </div>
+                '''
 
-            # 保存应该是实际回答，而不是带思考过程的完整内容
-            response_for_history = actual_response
-        else:
-            # 没有思考过程，直接显示格式化后的回答
-            formatted_response = self.format_markdown_and_code(self.current_response)
-            final_display = formatted_response
-            response_for_history = self.current_response
+                # 保存应该是实际回答，而不是带思考过程的完整内容
+                response_for_history = actual_response
+            else:
+                # 没有思考过程，直接显示格式化后的回答
+                formatted_response = self.format_markdown_and_code(self.current_response)
+                final_display = formatted_response
+                response_for_history = self.current_response
 
-        # 更新聊天窗口显示，确保正确换行
-        cursor.insertHtml(
-            f'<div style="color:#e0e0e0; word-wrap: break-word; max-width: 100%;"><b>AI助手:</b> {final_display}</div>')
+            # 更新聊天窗口显示，确保正确换行
+            cursor.insertHtml(
+                f'<div style="color:#e0e0e0; word-wrap: break-word; max-width: 100%;"><b>AI助手:</b> {final_display}</div>')
 
-        # 添加模型的回答到历史消息列表中
-        self.messages.append({"role": "assistant", "content": response_for_history})
+            # 添加模型的回答到历史消息列表中
+            self.messages.append({"role": "assistant", "content": response_for_history})
 
-        # 如果原来在思考，且思考开关仍然打开，就恢复思考
-        if was_thinking and self.thinking_toggle.isChecked():
-            self.thinking_display.append('<div style="color:#4a90e2;"><i>问题回答完毕，恢复思考...</i></div>')
-            self.start_thinking()
+            # 如果原来在思考，且思考开关仍然打开，就恢复思考
+            if was_thinking and self.thinking_toggle.isChecked():
+                self.thinking_display.append('<div style="color:#4a90e2;"><i>问题回答完毕，恢复思考...</i></div>')
+                self.start_thinking()
+        except Exception as e:
+            import traceback
+            error_msg = f"处理回复时出错: {str(e)}\n{traceback.format_exc()}"
+            print(error_msg)
+            self.chat_history.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
 
     def format_markdown_and_code(self, text):
         """格式化文本中的Markdown和代码片段"""

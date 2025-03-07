@@ -20,13 +20,31 @@ class MemoryRetriever:
 
         return memories_text
 
-    def enhance_prompt_with_memories(self, query, top_k=3):
-        """用相关记忆增强用户查询"""
+    def enhance_prompt_with_memories(self, query, top_k=3, similarity_threshold=0.6):
+        """
+        用相关记忆增强用户查询，但只在相关性超过阈值时使用
+
+        参数:
+            query (str): 用户的原始查询
+            top_k (int): 检索的最大记忆数量
+            similarity_threshold (float): 相关性阈值，0-1之间，只有超过这个阈值的记忆才会被使用
+
+        返回:
+            (str, list): 增强后的查询和使用的相关记忆列表
+        """
+        # 获取相关记忆
         memories = self.retrieve_relevant_memories(query, top_k)
-        memories_context = self.format_memories_for_context(memories)
 
-        if memories_context:
-            enhanced_query = f"{query}\n\n{memories_context}\n请基于以上内容和我过去的思考回答问题。"
-            return enhanced_query, memories
+        # 过滤出相关性高于阈值的记忆
+        relevant_memories = [memory for memory in memories if memory['similarity'] >= similarity_threshold]
 
-        return query, []
+        # 检查是否有满足条件的记忆
+        if relevant_memories:
+            # 将符合相关性阈值的记忆格式化为上下文
+            memories_context = self.format_memories_for_context(relevant_memories)
+            # 构建增强查询
+            enhanced_query = f"{query}\n\n{memories_context}\n请基于以上内容和我过去的思考回答问题。如果这些思考与当前问题无关，请忽略它们直接回答问题。"
+            return enhanced_query, relevant_memories
+        else:
+            # 没有相关记忆，返回原始查询
+            return query, []
