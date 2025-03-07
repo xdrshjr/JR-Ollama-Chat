@@ -1065,7 +1065,8 @@ class ChatWindow(QMainWindow):
             if not hasattr(self, 'memory_manager') or self.memory_manager is None:
                 self.memory_manager = OllamaMemoryManager(self.client)
                 self.log_to_console("初始化记忆管理器", "info")
-                # 初始化记忆检索器
+
+                # 在这里添加导入语句
                 from modules.memory_retriever import MemoryRetriever
                 self.memory_retriever = MemoryRetriever(self.memory_manager)
 
@@ -1082,6 +1083,8 @@ class ChatWindow(QMainWindow):
 
                 # 使用记忆增强提示
                 if not hasattr(self, 'memory_retriever') or self.memory_retriever is None:
+                    # 这里再次添加导入语句，确保在所有可能的路径中都能正确导入
+                    from modules.memory_retriever import MemoryRetriever
                     self.memory_retriever = MemoryRetriever(self.memory_manager)
 
                 # 记录开始检索

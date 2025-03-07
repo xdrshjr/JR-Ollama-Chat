@@ -2,7 +2,7 @@
 
 This desktop application allows you to interact with Ollama models running on your local network. It provides a clean, user-friendly interface for chatting with various AI models through the Ollama API.
 
-<img alt="img.png" height="300" src="imgs/img.png" width="400"/>
+<img alt="img.png" height="300" src="imgs/img_1.png" width="400"/>
 
 ## Features
 
