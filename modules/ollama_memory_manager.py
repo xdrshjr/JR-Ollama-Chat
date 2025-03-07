@@ -7,7 +7,7 @@ import faiss
 
 
 class OllamaMemoryManager:
-    def __init__(self, client, memory_dir="memory", embedding_model="bge-m3"):
+    def __init__(self, client, memory_dir="memory", embedding_model="bge-m3", chat_model=None):
         # 创建记忆存储目录
         self.memory_dir = memory_dir
         os.makedirs(self.memory_dir, exist_ok=True)
@@ -15,6 +15,7 @@ class OllamaMemoryManager:
         # 存储Ollama客户端
         self.client = client
         self.embedding_model = embedding_model
+        self.chat_model = chat_model if chat_model else embedding_model  # 如果未指定，默认使用嵌入模型
 
         # 初始化记忆和索引
         self.memories = []
@@ -23,6 +24,8 @@ class OllamaMemoryManager:
 
         # 加载已存在的记忆
         self.load_memories()
+
+        print(f"初始化记忆管理器: 嵌入模型={embedding_model}, 聊天模型={self.chat_model}")
 
     def _initialize_index(self, dimension):
         """使用确定的维度初始化索引"""
@@ -63,11 +66,88 @@ class OllamaMemoryManager:
         except Exception as e:
             print(f"保存记忆失败: {e}")
 
+    # In ollama_memory_manager.py
+    # 修改 OllamaMemoryManager 中的 add_memory 方法，确保记忆被正确存储
+
     def add_memory(self, thought, category="general"):
-        """添加新的思考记忆，使用Ollama嵌入API"""
+        """添加新的思考记忆，使用Ollama嵌入API，并生成关键句子总结"""
         try:
-            # 使用Ollama嵌入API生成嵌入向量
-            embedding_response = self.client.create_embedding(thought, self.embedding_model)
+            # 检查思考内容是否为空
+            if not thought or thought.strip() == "":
+                print("思考内容为空，跳过存储")
+                return -1
+
+            # 提取关键句子 - 首先尝试使用LLM进行总结
+            key_sentence = ""
+            try:
+                # 使用LLM生成关键句子总结
+                summary_prompt = f"请用一句简洁的话总结以下思考的核心概念(30字以内) \n\n{thought}\n\n总结："
+
+                # 调用API生成总结 - 使用聊天模型而不是嵌入模型
+                print(f"调用聊天模型 {self.chat_model} 生成关键句子总结")
+                summary_response = self.client.chat_completion(
+                    model=self.chat_model,  # 使用专门的聊天模型
+                    messages=[{"role": "user", "content": summary_prompt}],
+                    stream=False,
+                    temperature=0.3,
+                    max_tokens=50
+                )
+
+                # 详细记录响应结构以便调试
+                print(f"总结响应类型: {type(summary_response)}")
+                if summary_response:
+                    print(
+                        f"总结响应键: {summary_response.keys() if isinstance(summary_response, dict) else 'Not a dict'}")
+
+                # 检查响应是否有效并提取内容
+                if summary_response and isinstance(summary_response, dict):
+                    if "choices" in summary_response and summary_response["choices"]:
+                        content = summary_response["choices"][0]["message"]["content"].strip()
+                    # Ollama API可能使用不同的响应格式
+                    elif "message" in summary_response and "content" in summary_response["message"]:
+                        content = summary_response["message"]["content"].strip()
+                    else:
+                        print("无法从响应中提取关键句子")
+                        print(f"响应内容: {summary_response}")
+                        content = ""
+
+                    # 提取</think>之后的内容
+                    import re
+                    think_match = re.search(r'</think>(.*?)$', content, re.DOTALL)
+                    if think_match:
+                        key_sentence = think_match.group(1).strip()
+                        print(f"从</think>之后提取的核心概念: {key_sentence}")
+                    else:
+                        # 如果没有</think>标签，就使用完整内容
+                        key_sentence = content
+                        print(f"未找到</think>标签，使用完整内容: {key_sentence}")
+                else:
+                    print("LLM总结返回无效响应")
+                    print(f"响应内容: {summary_response}")
+            except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"使用LLM生成关键句子失败: {e}\n{error_trace}")
+
+            # 如果LLM总结失败，回退到简单的提取方法
+            if not key_sentence:
+                print("使用备选方法提取关键句子")
+                # 简单提取第一句话，最多100个字符
+                sentences = thought.split('。')
+                if sentences:
+                    key_sentence = sentences[0].strip()[:100]
+                    if len(key_sentence) == 100:
+                        key_sentence += "..."
+                else:
+                    # 如果无法分句，直接截取开头
+                    key_sentence = thought[:100].strip()
+                    if len(thought) > 100:
+                        key_sentence += "..."
+
+            print(f"最终使用的关键句子: {key_sentence}")
+
+            # 为关键句子生成嵌入向量
+            embedding_response = self.client.create_embedding(key_sentence, self.embedding_model)
             if not embedding_response or not embedding_response["data"]:
                 print("获取嵌入向量失败")
                 return -1
@@ -79,10 +159,13 @@ class OllamaMemoryManager:
                 self._initialize_index(len(embedding))
 
             # 创建记忆条目
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             memory = {
                 "id": len(self.memories),
                 "timestamp": time.time(),
+                "created_at": current_time,
                 "thought": thought,
+                "key_sentence": key_sentence,
                 "category": category,
                 "embedding": embedding
             }
@@ -96,9 +179,12 @@ class OllamaMemoryManager:
             # 保存记忆
             self.save_memories()
 
+            print(f"成功添加记忆 #{memory['id']}, 关键句子: {key_sentence}")
             return memory["id"]
         except Exception as e:
-            print(f"添加记忆失败: {e}")
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"添加记忆失败: {e}\n{error_trace}")
             return -1
 
     def get_content_based_similarity(self, query, memory_text):
@@ -131,12 +217,17 @@ class OllamaMemoryManager:
         # 计算相似度 - 匹配词数除以查询词数
         return matches / len(query_tokens)
 
+    # In ollama_memory_manager.py
     def search_memories(self, query, top_k=5):
-        """搜索相关记忆"""
+        """搜索相关记忆，基于关键句子的嵌入向量"""
         if not self.memories or self.index is None:
             return []
 
         try:
+            # 调试日志
+            print(f"搜索记忆: {query}")
+            print(f"当前记忆数量: {len(self.memories)}")
+
             # 使用Ollama嵌入API生成查询嵌入向量
             embedding_response = self.client.create_embedding(query, self.embedding_model)
             if not embedding_response or not embedding_response["data"]:
@@ -160,6 +251,7 @@ class OllamaMemoryManager:
 
             # 打印原始距离值用于调试
             print(f"原始FAISS距离值: {distances[0]}")
+            print(f"对应索引: {indices[0]}")
 
             # 返回结果
             results = []
@@ -167,40 +259,40 @@ class OllamaMemoryManager:
                 if idx < len(self.memories) and idx >= 0:
                     memory = self.memories[idx].copy()
 
+                    # 确保包含关键句子
+                    if "key_sentence" not in memory:
+                        memory["key_sentence"] = "未生成关键句子"
+
                     # 获取原始距离
                     distance = distances[0][i]
 
-                    # 使用余弦相似度的估计值 - 这需要记忆库中的嵌入已经被归一化
-                    # 对于未归一化的嵌入，我们可以使用一个基于距离的相对相似度计算
+                    # 计算相似度
+                    max_expected_distance = 2.0  # 调整期望的最大距离
+                    norm_distance = min(distance / max_expected_distance, 1.0)  # 归一化到[0,1]
+                    similarity = 1.0 - norm_distance  # 转换为相似度
 
-                    # 使用min-max归一化，假设最大距离为1000（可以根据实际观察调整）
-                    max_expected_distance = 1000.0
-                    min_expected_distance = 0.0
-
-                    # 距离归一化到[0,1]区间，然后反转（1-归一化距离）得到相似度
-                    norm_distance = (distance - min_expected_distance) / (max_expected_distance - min_expected_distance)
-                    norm_distance = max(0.0, min(1.0, norm_distance))  # 确保在[0,1]范围内
-                    similarity = 1.0 - norm_distance
-
-                    # 增强对比度 - 使高相似度更高，低相似度更低
-                    # 可以使用sigmoid或幂函数来增强对比度
-                    enhanced_similarity = similarity ** 0.5  # 开方会增强高相似度区域的对比度
-
-                    memory["similarity"] = enhanced_similarity
-                    memory["raw_distance"] = float(distance)  # 保留原始距离用于调试
+                    memory["similarity"] = similarity
+                    memory["raw_distance"] = float(distance)
                     memory.pop("embedding", None)  # 移除嵌入向量以减小数据量
                     results.append(memory)
 
             # 向结果添加基于内容的相似度增强
             for memory in results:
-                # 计算内容相似度
-                content_similarity = self.get_content_based_similarity(query, memory["thought"])
-                # 原始相似度与内容相似度加权组合
-                memory["similarity"] = 0.7 * memory["similarity"] + 0.3 * content_similarity
-                memory["content_similarity"] = content_similarity  # 保存用于调试
+                # 基于关键句子计算内容相似度
+                key_sentence = memory.get("key_sentence", "")
+                content_similarity = self.get_content_based_similarity(query, key_sentence) if key_sentence else 0
+
+                # 结合向量相似度和内容相似度
+                memory["similarity"] = 0.6 * memory["similarity"] + 0.4 * content_similarity
+                memory["content_similarity"] = content_similarity
 
             # 重新排序
             results.sort(key=lambda x: x["similarity"], reverse=True)
+
+            # 调试输出搜索结果
+            for i, res in enumerate(results):
+                print(f"匹配项 #{i + 1}: 相似度={res['similarity']:.4f}, 关键句子: {res.get('key_sentence', 'N/A')}")
+
             return results
         except Exception as e:
             import traceback

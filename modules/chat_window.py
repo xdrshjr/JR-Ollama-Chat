@@ -719,41 +719,54 @@ class ChatWindow(QMainWindow):
             print(error_msg)
             self.chat_history.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
 
+    # In chat_window.py, modify the start_thinking method
     def start_thinking(self):
         """启动思考进程"""
         try:
             # 检查必要组件是否初始化
             if not hasattr(self, 'memory_manager') or self.memory_manager is None:
                 print("初始化内存管理器...")
-                self.memory_manager = OllamaMemoryManager(self.client)
 
-            if not hasattr(self, 'memory_retriever') or self.memory_retriever is None:
-                print("初始化内存检索器...")
-                from modules.memory_retriever import MemoryRetriever
-                self.memory_retriever = MemoryRetriever(self.memory_manager)
+                # 用于总结的模型应该是聊天模型而不是嵌入模型
+                chat_model = self.model_combo.currentText()  # 使用当前选择的聊天模型
+                embed_model = self.embed_model_combo.currentText()  # 使用当前选择的嵌入模型
 
-            # 开始思考
-            print("开始启动思考生成器...")
+                self.log_to_console(f"使用嵌入模型: {embed_model}, 聊天模型: {chat_model}", "info")
+
+                # 创建一个新的 OllamaMemoryManager 实例
+                from modules.ollama_memory_manager import OllamaMemoryManager
+                self.memory_manager = OllamaMemoryManager(
+                    client=self.client,
+                    memory_dir="memory",
+                    embedding_model=embed_model,
+                    chat_model=chat_model  # 添加聊天模型参数
+                )
+
+                self.log_to_console("初始化记忆管理器完成", "success")
             model = self.model_combo.currentText()
-            self.thought_generator = ThoughtGenerator(self.client, model)
+
+            # 创建思考生成器并传入记忆管理器
+            self.thought_generator = ThoughtGenerator(self.client, model, self.memory_manager)
 
             # 连接新的信号
             self.thought_generator.thought_chunk_signal.connect(self.update_thinking_chunk)
             self.thought_generator.thought_complete_signal.connect(self.on_thought_complete)
             self.thought_generator.thinking_status.connect(self.update_thinking_status)
 
-            print("启动思考线程...")
+            self.log_to_console("启动思考线程...", "info")
             self.thought_generator.start()
 
             self.is_thinking = True
             self.memory_status.setText("记忆状态: 正在思考...")
-            self.thinking_display.append('<div style="color:#4a90e2;"><i>开始自我思考过程...</i></div>')
-            print("思考已开始")
+            self.thinking_display.append(
+                '<div style="color:#4a90e2;"><i>开始自我思考过程，基于记忆进行迭代发散...</i></div>')
+            self.log_to_console("思考进程已成功启动", "success")
         except Exception as e:
             import traceback
             error_msg = f"启动思考过程出错: {str(e)}\n{traceback.format_exc()}"
             print(error_msg)
             self.chat_history.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
+            self.log_to_console(f"启动思考失败: {str(e)}", "error")
             # 出错时取消勾选
             self.thinking_toggle.setChecked(False)
 
@@ -773,14 +786,41 @@ class ChatWindow(QMainWindow):
             if hasattr(self, 'current_thinking_display'):
                 delattr(self, 'current_thinking_display')
 
+            # 确保思考内容有意义
+            if not thought or len(thought.strip()) < 50:
+                self.log_to_console("生成的思考内容过短或为空，跳过记忆存储", "warning")
+                return
+
             # 添加到记忆
             if hasattr(self, 'memory_manager') and self.memory_manager:
+                # 打印调试信息
+                print(f"准备添加思考记忆，类别: {category}")
+                print(f"思考内容长度: {len(thought)}")
+
+                # 调用内存管理器添加记忆
                 memory_id = self.memory_manager.add_memory(thought, category)
-                self.update_memory_count()
-                self.log_to_console(f"新增思考记忆，ID: {memory_id}, 类别: {category}", "success")
-                # 显示思考文本摘要
-                thought_summary = thought[:100] + "..." if len(thought) > 100 else thought
-                self.log_to_console(f"思考内容: {thought_summary}", "info")
+
+                if memory_id >= 0:
+                    # 更新记忆计数
+                    self.update_memory_count()
+                    self.log_to_console(f"新增思考记忆，ID: {memory_id}, 类别: {category}", "success")
+
+                    # 获取关键句子
+                    key_sentence = ""
+                    if memory_id < len(self.memory_manager.memories):
+                        memory = self.memory_manager.memories[memory_id]
+                        key_sentence = memory.get("key_sentence", "")
+
+                    # 显示思考文本摘要
+                    thought_summary = thought[:100] + "..." if len(thought) > 100 else thought
+                    self.log_to_console(f"思考内容: {thought_summary}", "info")
+
+                    if key_sentence:
+                        self.log_to_console(f"关键句子: {key_sentence}", "info")
+                else:
+                    self.log_to_console("记忆存储失败", "error")
+            else:
+                self.log_to_console("记忆管理器未初始化，无法存储思考", "warning")
 
         except Exception as e:
             import traceback

@@ -7,33 +7,26 @@ class MemoryRetriever:
         """检索与查询相关的记忆"""
         return self.memory_manager.search_memories(query, top_k)
 
+    # In memory_retriever.py, update format_memories_for_context method
     def format_memories_for_context(self, memories):
-        """将记忆格式化为上下文信息"""
-        # 先按相似度排序
+        """将记忆格式化为上下文信息，突出显示关键句子"""
+        # 按相似度排序
         memories.sort(key=lambda x: x["similarity"], reverse=True)
 
         formatted_entries = []
         for i, memory in enumerate(memories):
-            # 获取子序列分析结果
-            subsequence_analysis = memory.get("subsequence_analysis", {})
-            top_subsequences = subsequence_analysis.get("top_subsequences", [])
+            # 获取关键句子
+            key_sentence = memory.get("key_sentence", "")
 
-            # 如果有高相似度的子序列，只展示最相关的部分
-            if top_subsequences and top_subsequences[0]["similarity"] >= 0.5:
-                # 构建突出显示相关子序列的内容
-                relevant_text = "相关段落:\n"
-                for j, subseq in enumerate(top_subsequences):
-                    if subseq["similarity"] >= 0.3:  # 只包含足够相关的子序列
-                        relevant_text += f"- {subseq['text']}\n"
-
-                # 添加记忆条目，突出显示相关部分
+            # 构建显示内容
+            if key_sentence:
                 formatted_entries.append(
                     f"记忆 {i + 1}（类别: {memory.get('category', '未分类')}）:\n"
-                    f"{relevant_text}\n"
+                    f"核心概念: {key_sentence}\n"
                     f"完整思考:\n{memory.get('thought', '')}"
                 )
             else:
-                # 没有特别相关的子序列，展示完整内容
+                # 没有关键句子，展示完整内容
                 formatted_entries.append(
                     f"记忆 {i + 1}（类别: {memory.get('category', '未分类')}）:\n"
                     f"{memory.get('thought', '')}"
