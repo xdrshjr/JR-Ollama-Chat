@@ -7,7 +7,7 @@ import faiss
 
 
 class OllamaMemoryManager:
-    def __init__(self, client, memory_dir="memory", embedding_model="nomic-embed-text"):
+    def __init__(self, client, memory_dir="memory", embedding_model="bge-m3"):
         # 创建记忆存储目录
         self.memory_dir = memory_dir
         os.makedirs(self.memory_dir, exist_ok=True)

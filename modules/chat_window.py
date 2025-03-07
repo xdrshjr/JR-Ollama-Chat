@@ -98,7 +98,7 @@ class ChatWindow(QMainWindow):
         # 嵌入模型选择
         settings_layout.addWidget(QLabel("嵌入模型:"))
         self.embed_model_combo = QComboBox()
-        self.embed_model_combo.addItems(["nomic-embed-text"])
+        self.embed_model_combo.addItems(["bge-m3"])
         self.embed_model_combo.setCurrentIndex(0)
         settings_layout.addWidget(self.embed_model_combo)
         self.embed_model_combo.currentTextChanged.connect(self.update_embedding_model)

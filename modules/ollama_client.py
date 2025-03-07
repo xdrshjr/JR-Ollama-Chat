@@ -103,7 +103,7 @@ class OllamaClient:
             print(f"流式请求错误: {e}")
             yield None
 
-    def create_embedding(self, text, model="nomic-embed-text"):
+    def create_embedding(self, text, model="bge-m3"):
         """
         使用Ollama的嵌入API创建文本嵌入
         支持单个文本或文本列表
