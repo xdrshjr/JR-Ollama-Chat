@@ -101,6 +101,36 @@ class OllamaMemoryManager:
             print(f"添加记忆失败: {e}")
             return -1
 
+    def get_content_based_similarity(self, query, memory_text):
+        """使用关键词匹配增强相似度评估"""
+        # 简单的关键词提取和匹配
+        import re
+        from collections import Counter
+
+        # 清理和分词函数
+        def tokenize(text):
+            # 转小写，去除特殊字符
+            text = re.sub(r'[^\w\s]', ' ', text.lower())
+            # 分词
+            return [word for word in text.split() if len(word) > 1]
+
+        # 提取查询和记忆的词
+        query_tokens = tokenize(query)
+        memory_tokens = tokenize(memory_text)
+
+        # 计算重合度
+        if not query_tokens:
+            return 0
+
+        # 建立查询词频字典
+        query_counter = Counter(query_tokens)
+
+        # 计算匹配的查询词数量（考虑词频）
+        matches = sum(min(query_counter.get(token, 0), 1) for token in memory_tokens)
+
+        # 计算相似度 - 匹配词数除以查询词数
+        return matches / len(query_tokens)
+
     def search_memories(self, query, top_k=5):
         """搜索相关记忆"""
         if not self.memories or self.index is None:
@@ -140,29 +170,36 @@ class OllamaMemoryManager:
                     # 获取原始距离
                     distance = distances[0][i]
 
-                    # 查看我们使用的是哪种FAISS索引类型
-                    if hasattr(self, 'index_type') and self.index_type == 'cosine':
-                        # 对于余弦相似度：距离 = 1 - 相似度，所以相似度 = 1 - 距离
-                        similarity = 1.0 - distance
-                    elif hasattr(self, 'index_type') and self.index_type == 'ip':
-                        # 对于内积，较大值表示更相似，但需要归一化
-                        # 假设最大可能内积为理论最大值1.0
-                        similarity = max(0.0, min(1.0, distance))
-                    else:
-                        # 对于欧几里得距离 (L2)，使用更合适的映射函数
-                        scaling_factor = 0.01  # 可以根据实际距离分布调整
-                        similarity = float(math.exp(-distance * scaling_factor)) * 100
+                    # 使用余弦相似度的估计值 - 这需要记忆库中的嵌入已经被归一化
+                    # 对于未归一化的嵌入，我们可以使用一个基于距离的相对相似度计算
 
-                    # 确保相似度在有效范围内
-                    similarity = max(0.0, min(1.0, similarity))
+                    # 使用min-max归一化，假设最大距离为1000（可以根据实际观察调整）
+                    max_expected_distance = 1000.0
+                    min_expected_distance = 0.0
 
-                    # 设置相似度，并保留原始距离以供调试
-                    memory["similarity"] = similarity
-                    memory["raw_distance"] = float(distance)
+                    # 距离归一化到[0,1]区间，然后反转（1-归一化距离）得到相似度
+                    norm_distance = (distance - min_expected_distance) / (max_expected_distance - min_expected_distance)
+                    norm_distance = max(0.0, min(1.0, norm_distance))  # 确保在[0,1]范围内
+                    similarity = 1.0 - norm_distance
+
+                    # 增强对比度 - 使高相似度更高，低相似度更低
+                    # 可以使用sigmoid或幂函数来增强对比度
+                    enhanced_similarity = similarity ** 0.5  # 开方会增强高相似度区域的对比度
+
+                    memory["similarity"] = enhanced_similarity
+                    memory["raw_distance"] = float(distance)  # 保留原始距离用于调试
                     memory.pop("embedding", None)  # 移除嵌入向量以减小数据量
                     results.append(memory)
 
-            # 按相似度从高到低排序
+            # 向结果添加基于内容的相似度增强
+            for memory in results:
+                # 计算内容相似度
+                content_similarity = self.get_content_based_similarity(query, memory["thought"])
+                # 原始相似度与内容相似度加权组合
+                memory["similarity"] = 0.7 * memory["similarity"] + 0.3 * content_similarity
+                memory["content_similarity"] = content_similarity  # 保存用于调试
+
+            # 重新排序
             results.sort(key=lambda x: x["similarity"], reverse=True)
             return results
         except Exception as e:

@@ -42,35 +42,43 @@ class MemoryRetriever:
         # 合并所有格式化的条目
         return "以下是我过去的相关思考:\n\n" + "\n\n".join(formatted_entries)
 
-    def enhance_prompt_with_memories(self, query, top_k=3, similarity_threshold=0.6):
+    # 在 memory_retriever.py 中的 enhance_prompt_with_memories 方法中
+
+    def enhance_prompt_with_memories(self, query, top_k=3, similarity_threshold=0.65):
         """
         用相关记忆增强用户查询，但只在相关性超过阈值时使用
-
-        参数:
-            query (str): 用户的原始查询
-            top_k (int): 检索的最大记忆数量
-            similarity_threshold (float): 相关性阈值，0-1之间，只有超过这个阈值的记忆才会被使用
-
-        返回:
-            (str, list): 增强后的查询和使用的相关记忆列表
         """
         # 获取相关记忆
         memories = self.retrieve_relevant_memories(query, top_k)
 
+        # 调试信息
+        if memories:
+            print(f"检索到的记忆相似度: {[round(m['similarity'], 4) for m in memories]}")
+
+        # 动态调整阈值 - 基于记忆相似度分布
+        if memories:
+            # 方法1: 使用最高相似度的一定比例作为阈值
+            highest_similarity = memories[0]["similarity"]
+            dynamic_threshold = max(0.3, highest_similarity * 0.8)  # 至少0.3，或最高相似度的80%
+
+            # 方法2: 检测相似度断崖
+            if len(memories) > 1:
+                similarities = [m["similarity"] for m in memories]
+                gaps = [similarities[i] - similarities[i + 1] for i in range(len(similarities) - 1)]
+                if gaps and max(gaps) > 0.1:  # 如果有明显断崖
+                    # 找到最大断崖的位置
+                    cliff_index = gaps.index(max(gaps))
+                    # 只使用断崖之前的记忆
+                    memories = memories[:cliff_index + 1]
+                    dynamic_threshold = 0  # 已经基于断崖筛选，不需要再用阈值
+        else:
+            dynamic_threshold = similarity_threshold
+
+        # 打印动态阈值
+        print(f"使用动态相似度阈值: {dynamic_threshold}")
+
         # 过滤出相关性高于阈值的记忆
-        # 使用子序列分析的最大相似度和整体相似度的组合来判断
-        relevant_memories = []
-        for memory in memories:
-            # 检查子序列分析结果
-            if "subsequence_analysis" in memory and memory["subsequence_analysis"][
-                "max_similarity"] >= similarity_threshold:
-                # 有高相似度的子序列，视为相关
-                memory["relevance_reason"] = "子序列相似度高"
-                relevant_memories.append(memory)
-            # 备选：整体相似度也很高
-            elif memory["similarity"] >= similarity_threshold:
-                memory["relevance_reason"] = "整体相似度高"
-                relevant_memories.append(memory)
+        relevant_memories = [m for m in memories if m["similarity"] >= dynamic_threshold]
 
         # 检查是否有满足条件的记忆
         if relevant_memories:

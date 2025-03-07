@@ -964,10 +964,16 @@ class ChatWindow(QMainWindow):
                         self.log_to_console(f"  内容: {memory_text}", "info")
 
                     similarities = [f"{memory['similarity']:.2f}" for memory in memories]
-                    memory_info = f"已找到 {len(memories)} 条相关记忆 (相关度: {', '.join(similarities)})"
+                    # 获取原始距离
+                    raw_distances = [f"{memory.get('raw_distance', 0):.1f}" for memory in memories]
+                    content_sims = [f"{memory.get('content_similarity', 0):.2f}" for memory in memories]
+
+                    memory_info = (f"已找到 {len(memories)} 条相关记忆 "
+                                   f"(相似度: {', '.join(similarities)}, "
+                                   f"原始距离: {', '.join(raw_distances)}, "
+                                   f"内容相似度: {', '.join(content_sims)})")
+
                     self.chat_history.append(f'<div style="color:#808080;"><i>--- {memory_info} ---</i></div>')
-                    # 使用增强后的查询
-                    self.messages.append({"role": "user", "content": enhanced_query})
                 else:
                     # 没有足够相关的记忆，使用原始查询
                     self.log_to_console(f"检索完成，用时: {search_time:.1f}毫秒，未找到足够相关的记忆", "warning")

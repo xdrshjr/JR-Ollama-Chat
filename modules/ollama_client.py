@@ -145,6 +145,14 @@ class OllamaClient:
 
             # 返回嵌入向量
             embedding = result.get("embedding", [])
+
+            # 确保维度一致性 - 如果已经初始化过索引，确保新的嵌入与索引维度一致
+            if hasattr(self, 'dimension') and self.dimension:
+                if len(embedding) > self.dimension:
+                    embedding = embedding[:self.dimension]  # 截断过长的嵌入
+                elif len(embedding) < self.dimension:
+                    embedding.extend([0] * (self.dimension - len(embedding)))  # 填充过短的嵌入
+
             return embedding
         except Exception as e:
             print(f"获取嵌入向量失败: {e}")
