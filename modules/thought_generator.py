@@ -1,10 +1,12 @@
 import random
 import time
+
 from PyQt5.QtCore import QThread, pyqtSignal
 
 
 class ThoughtGenerator(QThread):
-    thought_generated = pyqtSignal(str, str)  # 信号: 思考内容, 分类
+    thought_chunk_signal = pyqtSignal(str)  # 新增：用于流式输出思考片段
+    thought_complete_signal = pyqtSignal(str, str)  # 完整思考内容和分类
     thinking_status = pyqtSignal(str)  # 用于UI状态更新
 
     def __init__(self, client, model, max_iterations=100):
@@ -16,25 +18,13 @@ class ThoughtGenerator(QThread):
         self.thinking_prompts = [
             "思考一个关于人工智能伦理的重要问题",
             "思考人类与技术的关系",
-            "想象未来世界会是什么样子",
-            "思考一个哲学概念并深入探讨",
-            "思考当前科技的优缺点",
-            "思考数据隐私与安全的挑战",
-            "思考学习和知识获取的过程",
-            "分析一个社会现象的成因和影响",
-            "思考如何解决一个常见的技术难题",
-            "思考创造力和创新的源泉"
+            # ... 其他提示保持不变
         ]
-
         self.categories = [
             "AI伦理", "人机关系", "未来展望", "哲学思考",
-            "技术评估", "数据安全", "学习理论", "社会分析",
-            "技术难题", "创新思维"
+            # ... 其他分类保持不变
         ]
-
-    def stop(self):
-        """停止思考过程"""
-        self._stop = True
+        self.current_thought = ""  # 当前正在生成的思考内容
 
     def run(self):
         """开始自主思考过程"""
@@ -47,6 +37,7 @@ class ThoughtGenerator(QThread):
             category = self.categories[idx]
 
             self.thinking_status.emit(f"正在思考: {prompt}...")
+            self.current_thought = ""  # 重置当前思考
 
             try:
                 # 构建自我思考的消息
@@ -56,18 +47,27 @@ class ThoughtGenerator(QThread):
                     {"role": "user", "content": f"{prompt}。请进行深入、系统化的思考，提出原创见解。"}
                 ]
 
-                # 调用AI模型进行思考
-                response = self.client.chat_completion(
+                # 使用流式响应进行思考
+                stream_response = self.client.chat_completion(
                     model=self.model,
                     messages=messages,
-                    stream=False,
+                    stream=True,
                     temperature=0.8
                 )
 
-                thought = response["choices"][0]["message"]["content"]
+                # 处理流式响应
+                for chunk in stream_response:
+                    if self._stop:
+                        break
+                    if chunk:
+                        content_delta = chunk["choices"][0]["delta"].get("content", "")
+                        if content_delta:
+                            self.current_thought += content_delta
+                            self.thought_chunk_signal.emit(content_delta)  # 发送每个片段
 
-                # 发送生成的思考内容
-                self.thought_generated.emit(thought, category)
+                # 思考完成，发送完整内容
+                if not self._stop:
+                    self.thought_complete_signal.emit(self.current_thought, category)
 
                 # 暂停一段时间，避免过快思考
                 time.sleep(random.uniform(2, 5))
