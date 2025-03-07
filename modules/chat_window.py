@@ -11,7 +11,7 @@ from modules.ollama_memory_manager import OllamaMemoryManager
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTextEdit, QLineEdit,
                              QPushButton, QVBoxLayout, QHBoxLayout, QWidget,
                              QLabel, QComboBox, QSlider, QSplitter, QCheckBox,
-                             QGroupBox, QFrame)
+                             QGroupBox, QFrame, QTabWidget)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QFont, QTextCursor, QIcon
 
@@ -62,6 +62,11 @@ class ChatWindow(QMainWindow):
             self.memory_count_startup = 0
 
         self.initUI()
+
+        # 记录启动信息
+        self.log_to_console("JR-Ollama Chat 已启动")
+        self.log_to_console(f"服务器地址: {self.server_input.text()}")
+        self.log_to_console(f"默认模型: {self.model_combo.currentText()}")
 
         # 如果有现有记忆，显示通知
         if self.has_existing_memories:
@@ -141,6 +146,17 @@ class ChatWindow(QMainWindow):
         self.memory_count.setStyleSheet("color: #e0e0e0;")
         memory_layout.addWidget(self.memory_count)
 
+        # 记忆相关度阈值
+        memory_layout.addWidget(QLabel("记忆相关度阈值:"))
+        self.similarity_threshold_slider = QSlider(Qt.Horizontal)
+        self.similarity_threshold_slider.setRange(0, 100)
+        self.similarity_threshold_slider.setValue(65)  # 默认0.65
+        self.similarity_threshold_slider.setFixedWidth(100)
+        memory_layout.addWidget(self.similarity_threshold_slider)
+        self.similarity_threshold_label = QLabel("0.65")
+        memory_layout.addWidget(self.similarity_threshold_label)
+        self.similarity_threshold_slider.valueChanged.connect(self.update_similarity_threshold_label)
+
         # 删除所有记忆按钮
         self.clear_memory_btn = QPushButton("清空所有记忆")
         self.clear_memory_btn.clicked.connect(self.clear_all_memories)
@@ -171,7 +187,36 @@ class ChatWindow(QMainWindow):
         self.chat_history.setLineWrapMode(QTextEdit.WidgetWidth)
         chat_layout.addWidget(self.chat_history, 1)  # 分配更多空间给聊天历史
 
-        # 右侧思考区域 (1/4)
+        # 右侧面板
+        self.right_panel = QWidget()
+        right_layout = QVBoxLayout(self.right_panel)
+
+        # 创建选项卡窗口
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #3a3a3a;
+                background: #232323;
+                border-radius: 3px;
+            }
+            QTabBar::tab {
+                background: #333333;
+                color: #b0b0b0;
+                padding: 8px 12px;
+                margin-right: 2px;
+                border-top-left-radius: 3px;
+                border-top-right-radius: 3px;
+            }
+            QTabBar::tab:selected {
+                background: #4a90e2;
+                color: white;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #444444;
+            }
+        """)
+
+        # 思考过程选项卡
         self.thinking_widget = QWidget()
         thinking_layout = QVBoxLayout(self.thinking_widget)
 
@@ -197,9 +242,51 @@ class ChatWindow(QMainWindow):
         self.thinking_display.setLineWrapMode(QTextEdit.WidgetWidth)
         thinking_layout.addWidget(self.thinking_display, 1)
 
+        # 控制台选项卡
+        self.console_widget = QWidget()
+        console_layout = QVBoxLayout(self.console_widget)
+
+        # 控制台标题区域
+        console_header = QHBoxLayout()
+        console_title = QLabel("系统日志")
+        console_title.setStyleSheet("color: #4a90e2; font-weight: bold; font-size: 14px;")
+        console_header.addWidget(console_title)
+
+        # 添加清除按钮
+        clear_console_btn = QPushButton("清除日志")
+        clear_console_btn.setFixedWidth(80)
+        clear_console_btn.clicked.connect(lambda: self.console_display.clear())
+        console_header.addWidget(clear_console_btn)
+
+        console_layout.addLayout(console_header)
+
+        # 控制台显示
+        self.console_display = QTextEdit()
+        self.console_display.setReadOnly(True)
+        self.console_display.setFont(QFont("Courier New", 10))  # 使用等宽字体
+        self.console_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #1a1a1a;
+                color: #33ee33;  /* 绿色文本模拟终端 */
+                border: 1px solid #3a3a3a;
+                border-radius: 8px;
+                padding: 5px;
+                font-family: 'Courier New', monospace;
+            }
+        """)
+        self.console_display.setLineWrapMode(QTextEdit.WidgetWidth)
+        console_layout.addWidget(self.console_display, 1)
+
+        # 添加两个选项卡
+        self.tabs.addTab(self.thinking_widget, "思考过程")
+        self.tabs.addTab(self.console_widget, "系统日志")
+
+        # 添加选项卡到右侧布局
+        right_layout.addWidget(self.tabs)
+
         # 添加到分割器
         self.splitter.addWidget(self.chat_widget)
-        self.splitter.addWidget(self.thinking_widget)
+        self.splitter.addWidget(self.right_panel)  # 使用新的右侧面板
 
         # 设置初始分割比例 (3:1)
         self.splitter.setSizes([int(self.width() * 0.75), int(self.width() * 0.25)])
@@ -322,6 +409,46 @@ class ChatWindow(QMainWindow):
                 background-color: #4a90e2;
             }
         """)
+
+    def update_similarity_threshold_label(self):
+        """更新相似度阈值标签显示"""
+        value = self.similarity_threshold_slider.value() / 100
+        self.similarity_threshold_label.setText(f"{value:.2f}")
+
+    def log_to_console(self, message, message_type="info"):
+        """
+        向控制台面板添加日志信息
+
+        参数:
+            message (str): 日志信息
+            message_type (str): 日志类型 - info, warning, error, success
+        """
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+
+        # 根据消息类型设置颜色
+        if message_type == "info":
+            color = "#33ee33"  # 绿色
+        elif message_type == "warning":
+            color = "#ffcc00"  # 黄色
+        elif message_type == "error":
+            color = "#ff3333"  # 红色
+        elif message_type == "success":
+            color = "#33ccff"  # 蓝色
+        else:
+            color = "#ffffff"  # 白色
+
+        # 构建HTML格式的日志消息
+        log_entry = f'<span style="color: #aaaaaa;">[{timestamp}]</span> <span style="color: {color};">{message}</span><br>'
+
+        # 添加到控制台显示
+        self.console_display.append(log_entry)
+
+        # 滚动到底部
+        self.console_display.verticalScrollBar().setValue(
+            self.console_display.verticalScrollBar().maximum())
+
+        # 同时打印到标准输出（便于调试）
+        print(f"[{timestamp}] {message}")
 
     def closeEvent(self, event):
         """在窗口关闭时处理线程终止"""
@@ -491,13 +618,17 @@ class ChatWindow(QMainWindow):
 
             # 添加到记忆
             if hasattr(self, 'memory_manager') and self.memory_manager:
-                self.memory_manager.add_memory(thought, category)
+                memory_id = self.memory_manager.add_memory(thought, category)
                 self.update_memory_count()
+                self.log_to_console(f"新增思考记忆，ID: {memory_id}, 类别: {category}", "success")
+                # 显示思考文本摘要
+                thought_summary = thought[:100] + "..." if len(thought) > 100 else thought
+                self.log_to_console(f"思考内容: {thought_summary}", "info")
 
         except Exception as e:
             import traceback
             error_msg = f"处理完整思考内容出错: {str(e)}\n{traceback.format_exc()}"
-            print(error_msg)
+            self.log_to_console(error_msg, "error")
             self.thinking_display.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
 
     # 在 chat_window.py 中修改 update_thinking_chunk 方法
@@ -627,25 +758,54 @@ class ChatWindow(QMainWindow):
 
         # 检查是否使用记忆
         if self.use_memory_cb.isChecked():
+            self.log_to_console("正在使用记忆增强...", "info")
+
             # 确保记忆管理器已初始化
             if not hasattr(self, 'memory_manager') or self.memory_manager is None:
                 self.memory_manager = OllamaMemoryManager(self.client)
+                self.log_to_console("初始化记忆管理器", "info")
                 # 初始化记忆检索器
                 from modules.memory_retriever import MemoryRetriever
                 self.memory_retriever = MemoryRetriever(self.memory_manager)
 
             # 如果记忆管理器存在且有记忆
             if hasattr(self, 'memory_manager') and self.memory_manager.memories:
-                # 使用记忆增强提示，设置相关性阈值为0.65
+                # 获取相关性阈值
+                if hasattr(self, 'similarity_threshold_slider'):
+                    threshold = self.similarity_threshold_slider.value() / 100
+                else:
+                    threshold = 0.65
+
+                self.log_to_console(f"开始检索记忆，相关性阈值: {threshold:.2f}", "info")
+                self.log_to_console(f"用户问题: \"{user_text}\"", "info")
+
+                # 使用记忆增强提示
                 if not hasattr(self, 'memory_retriever') or self.memory_retriever is None:
                     self.memory_retriever = MemoryRetriever(self.memory_manager)
 
+                # 记录开始检索
+                start_time = time.time()
                 enhanced_query, memories = self.memory_retriever.enhance_prompt_with_memories(user_text,
                                                                                               top_k=3,
-                                                                                              similarity_threshold=0.65)
+                                                                                              similarity_threshold=threshold)
+                end_time = time.time()
+                search_time = (end_time - start_time) * 1000  # 转换为毫秒
 
                 # 如果找到了相关记忆，在聊天历史中显示
                 if memories:
+                    self.log_to_console(f"检索完成，用时: {search_time:.1f}毫秒，找到 {len(memories)} 条相关记忆",
+                                        "success")
+
+                    # 在日志中详细显示每条记忆的信息
+                    for i, memory in enumerate(memories):
+                        self.log_to_console(
+                            f"记忆 #{i + 1}: 相关度 {memory['similarity']:.4f}, 类别: {memory['category']}", "info")
+                        # 显示记忆文本摘要（太长的话只显示一部分）
+                        memory_text = memory['thought']
+                        if len(memory_text) > 100:
+                            memory_text = memory_text[:97] + "..."
+                        self.log_to_console(f"  内容: {memory_text}", "info")
+
                     similarities = [f"{memory['similarity']:.2f}" for memory in memories]
                     memory_info = f"已找到 {len(memories)} 条相关记忆 (相关度: {', '.join(similarities)})"
                     self.chat_history.append(f'<div style="color:#808080;"><i>--- {memory_info} ---</i></div>')
@@ -653,15 +813,18 @@ class ChatWindow(QMainWindow):
                     self.messages.append({"role": "user", "content": enhanced_query})
                 else:
                     # 没有足够相关的记忆，使用原始查询
+                    self.log_to_console(f"检索完成，用时: {search_time:.1f}毫秒，未找到足够相关的记忆", "warning")
                     self.chat_history.append(
                         '<div style="color:#808080;"><i>--- 未找到足够相关的记忆，使用原始查询 ---</i></div>')
                     self.messages.append({"role": "user", "content": user_text})
             else:
                 # 没有记忆，提示用户
+                self.log_to_console("没有可用的记忆，使用原始查询", "warning")
                 self.chat_history.append('<div style="color:#808080;"><i>--- 没有可用的记忆，使用原始查询 ---</i></div>')
                 self.messages.append({"role": "user", "content": user_text})
         else:
             # 不使用记忆，直接添加原始消息
+            self.log_to_console("记忆功能未启用，使用原始查询", "info")
             self.messages.append({"role": "user", "content": user_text})
 
         # 清空输入框
