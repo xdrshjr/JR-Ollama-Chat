@@ -123,18 +123,41 @@ class ChatWindow(QMainWindow):
 
         main_layout.addLayout(settings_layout)
 
-        # 添加记忆功能控制部分
+        # 在initUI方法中修改memory_layout的实现
         memory_layout = QHBoxLayout()
+
+        # 创建一个固定大小的状态框
+        memory_status_frame = QFrame()
+        memory_status_frame.setFixedWidth(150)  # 设置固定宽度
+        memory_status_frame.setFixedHeight(30)  # 设置固定高度
+        memory_status_frame.setFrameShape(QFrame.StyledPanel)
+        memory_status_frame.setStyleSheet("""
+            QFrame {
+                background-color: #333333;
+                border-radius: 5px;
+                border: 1px solid #4a4a4a;
+            }
+        """)
+        memory_status_layout = QHBoxLayout(memory_status_frame)
+        memory_status_layout.setContentsMargins(5, 2, 5, 2)  # 减小内边距
+
+        # 创建记忆状态标签并添加到状态框中
+        self.memory_status = QLabel("记忆状态: 空闲")
+        self.memory_status.setStyleSheet("""
+            color: #e0e0e0;
+            font-size: 11px;
+            font-weight: bold;
+        """)
+        memory_status_layout.addWidget(self.memory_status)
 
         self.use_memory_cb = QCheckBox("使用记忆")
         self.use_memory_cb.setChecked(False)
         self.use_memory_cb.setStyleSheet("color: #e0e0e0;")
-        self.use_memory_cb.stateChanged.connect(self.toggle_memory_usage)  # 添加事件处理
+        self.use_memory_cb.stateChanged.connect(self.toggle_memory_usage)
         memory_layout.addWidget(self.use_memory_cb)
 
-        self.memory_status = QLabel("记忆状态: 空闲")
-        self.memory_status.setStyleSheet("color: #e0e0e0;")
-        memory_layout.addWidget(self.memory_status)
+        # 添加固定大小的状态框，而不是直接添加标签
+        memory_layout.addWidget(memory_status_frame)
 
         # 修改为开关按钮
         self.thinking_toggle = QCheckBox("自我思考")
@@ -142,9 +165,31 @@ class ChatWindow(QMainWindow):
         self.thinking_toggle.clicked.connect(self.toggle_thinking)
         memory_layout.addWidget(self.thinking_toggle)
 
+        # 创建记忆计数显示框
+        memory_count_frame = QFrame()
+        memory_count_frame.setFixedWidth(100)  # 设置固定宽度
+        memory_count_frame.setFixedHeight(30)  # 设置固定高度
+        memory_count_frame.setFrameShape(QFrame.StyledPanel)
+        memory_count_frame.setStyleSheet("""
+            QFrame {
+                background-color: #333333;
+                border-radius: 5px;
+                border: 1px solid #4a4a4a;
+            }
+        """)
+        memory_count_layout = QHBoxLayout(memory_count_frame)
+        memory_count_layout.setContentsMargins(5, 2, 5, 2)  # 减小内边距
+
         self.memory_count = QLabel("记忆数量: 0")
-        self.memory_count.setStyleSheet("color: #e0e0e0;")
-        memory_layout.addWidget(self.memory_count)
+        self.memory_count.setStyleSheet("""
+            color: #e0e0e0;
+            font-size: 11px;
+            font-weight: bold;
+        """)
+        memory_count_layout.addWidget(self.memory_count)
+
+        # 添加记忆计数框
+        memory_layout.addWidget(memory_count_frame)
 
         # 记忆相关度阈值
         memory_layout.addWidget(QLabel("记忆相关度阈值:"))
@@ -515,13 +560,13 @@ class ChatWindow(QMainWindow):
         try:
             if hasattr(self, 'memory_manager') and self.memory_manager:
                 count = len(self.memory_manager.memories)
-                self.memory_count.setText(f"记忆数量: {count}")
+                self.memory_count.setText(f"记忆: {count}")
 
                 # 如果记忆功能已启用，也更新状态文本
                 if self.use_memory_cb.isChecked():
-                    self.memory_status.setText(f"记忆状态: 已启用 ({count} 条)")
+                    self.memory_status.setText(f"状态: 已启用 ({count})")
             else:
-                self.memory_count.setText("记忆数量: 0")
+                self.memory_count.setText("记忆: 0")
         except Exception as e:
             print(f"更新记忆数量出错: {str(e)}")
 
@@ -620,11 +665,15 @@ class ChatWindow(QMainWindow):
                             '<div style="color:#808080;"><i>--- 没有找到已存储的记忆 ---</i></div>')
                         self.log_to_console("没有找到已存储的记忆", "warning")
 
-                self.memory_status.setText(f"记忆状态: 已启用 ({len(self.memory_manager.memories)} 条)")
+                if hasattr(self, 'memory_manager'):
+                    count = len(self.memory_manager.memories)
+                    self.memory_status.setText(f"状态: 已启用 ({count})")
+                else:
+                    self.memory_status.setText("状态: 已启用")
                 self.log_to_console("记忆功能已启用", "success")
             else:
                 # 禁用记忆使用（但不删除记忆）
-                self.memory_status.setText("记忆状态: 已禁用")
+                self.memory_status.setText("状态: 已禁用")
                 self.chat_history.append('<div style="color:#808080;"><i>--- 记忆功能已禁用 ---</i></div>')
                 self.log_to_console("记忆功能已禁用", "warning")
         except Exception as e:
@@ -780,7 +829,7 @@ class ChatWindow(QMainWindow):
             self.thought_generator.start()
 
             self.is_thinking = True
-            self.memory_status.setText("记忆状态: 正在思考...")
+            self.memory_status.setText("状态: 思考中")
             self.thinking_display.append(
                 '<div style="color:#4a90e2;"><i>开始自我思考过程，基于记忆进行迭代发散...</i></div>')
             self.log_to_console("思考进程已成功启动", "success")
@@ -909,7 +958,7 @@ class ChatWindow(QMainWindow):
                 self.thought_generator = None
 
             self.is_thinking = False
-            self.memory_status.setText("记忆状态: 空闲")
+            self.memory_status.setText("状态: 空闲")
             self.thinking_display.append('<div style="color:#e07a7a;"><i>思考已停止</i></div>')
             print("思考已停止")
         except Exception as e:
@@ -920,7 +969,13 @@ class ChatWindow(QMainWindow):
 
     def update_thinking_status(self, status):
         """更新思考状态"""
-        self.memory_status.setText(f"记忆状态: {status}")
+        # 截断过长的状态文本
+        if len(status) > 15:
+            short_status = status[:12] + "..."
+        else:
+            short_status = status
+
+        self.memory_status.setText(f"状态: {short_status}")
         self.thinking_display.append(f'<div style="color:#808080;"><i>状态: {status}</i></div>')
 
     def on_thought_generated(self, thought, category):
