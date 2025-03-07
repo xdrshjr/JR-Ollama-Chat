@@ -39,7 +39,7 @@ class MemoryRetriever:
 
     def enhance_prompt_with_memories(self, query, top_k=3, similarity_threshold=0.65):
         """
-        用相关记忆增强用户查询，但只在相关性超过阈值时使用
+        用相关记忆增强用户查询，但只选择最相关的一条记忆
         """
         # 获取相关记忆
         memories = self.retrieve_relevant_memories(query, top_k)
@@ -48,38 +48,22 @@ class MemoryRetriever:
         if memories:
             print(f"检索到的记忆相似度: {[round(m['similarity'], 4) for m in memories]}")
 
-        # 动态调整阈值 - 基于记忆相似度分布
-        if memories:
-            # 方法1: 使用最高相似度的一定比例作为阈值
-            highest_similarity = memories[0]["similarity"]
-            dynamic_threshold = max(0.3, highest_similarity * 0.8)  # 至少0.3，或最高相似度的80%
+        # 检查是否有记忆，并且最高相似度的记忆超过阈值
+        if memories and memories[0]["similarity"] >= similarity_threshold:
+            # 选择最相关的一条记忆
+            best_memory = memories[0]
+            print(f"使用最高相似度记忆: {round(best_memory['similarity'], 4)}")
 
-            # 方法2: 检测相似度断崖
-            if len(memories) > 1:
-                similarities = [m["similarity"] for m in memories]
-                gaps = [similarities[i] - similarities[i + 1] for i in range(len(similarities) - 1)]
-                if gaps and max(gaps) > 0.1:  # 如果有明显断崖
-                    # 找到最大断崖的位置
-                    cliff_index = gaps.index(max(gaps))
-                    # 只使用断崖之前的记忆
-                    memories = memories[:cliff_index + 1]
-                    dynamic_threshold = 0  # 已经基于断崖筛选，不需要再用阈值
-        else:
-            dynamic_threshold = similarity_threshold
+            # 将最相关的记忆格式化为上下文
+            memory_context = self.format_memories_for_context([best_memory])
 
-        # 打印动态阈值
-        print(f"使用动态相似度阈值: {dynamic_threshold}")
-
-        # 过滤出相关性高于阈值的记忆
-        relevant_memories = [m for m in memories if m["similarity"] >= dynamic_threshold]
-
-        # 检查是否有满足条件的记忆
-        if relevant_memories:
-            # 将符合相关性阈值的记忆格式化为上下文
-            memories_context = self.format_memories_for_context(relevant_memories)
             # 构建增强查询
-            enhanced_query = f"{query}\n\n{memories_context}\n请基于以上内容和我过去的思考回答问题。如果这些思考与当前问题无关，请忽略它们直接回答问题。"
-            return enhanced_query, relevant_memories
+            enhanced_query = f"[Query]\n{query}\n\n[Memory]{memory_context}\n请基于以上内容和我过去的思考回答问题。如果这些思考与当前问题无关，请忽略它们直接回答问题。"
+            return enhanced_query, [best_memory]
         else:
-            # 没有相关记忆，返回原始查询
+            # 没有相关记忆，或相似度不够高，返回原始查询
+            if memories:
+                print(f"最高相似度 {round(memories[0]['similarity'], 4)} 低于阈值 {similarity_threshold}，不使用记忆")
+            else:
+                print("未检索到相关记忆")
             return query, []

@@ -361,6 +361,11 @@ class OllamaMemoryManager:
 
             # 返回结果
             results = []
+
+            # 计算余弦相似度需要获取原始向量
+            query_embedding_np = np.array(query_embedding)
+            query_norm = np.linalg.norm(query_embedding_np)
+
             for i, idx in enumerate(indices[0]):
                 if idx < len(self.memories) and idx >= 0:
                     memory = self.memories[idx].copy()
@@ -372,10 +377,32 @@ class OllamaMemoryManager:
                     # 获取原始距离
                     distance = distances[0][i]
 
-                    # 计算相似度
-                    max_expected_distance = 2.0  # 调整期望的最大距离
-                    norm_distance = min(distance / max_expected_distance, 1.0)  # 归一化到[0,1]
-                    similarity = 1.0 - norm_distance  # 转换为相似度
+                    # 直接从记忆中获取对应的嵌入向量进行余弦相似度计算
+                    memory_embedding = np.array(self.memories[idx].get("embedding", []))
+
+                    if len(memory_embedding) > 0:
+                        # 计算余弦相似度
+                        memory_norm = np.linalg.norm(memory_embedding)
+                        dot_product = np.dot(query_embedding_np, memory_embedding)
+
+                        # 避免除零错误
+                        if query_norm > 0 and memory_norm > 0:
+                            cosine_similarity = dot_product / (query_norm * memory_norm)
+                            # 将相似度范围从[-1, 1]转换为[0, 1]
+                            similarity = (cosine_similarity + 1) / 2
+                        else:
+                            similarity = 0
+                    else:
+                        # 如果没有可用的嵌入向量，使用距离的反比作为相似度
+                        # 找出当前批次中的最大距离作为参考
+                        max_distance = np.max(distances[0])
+                        if max_distance > 0:
+                            similarity = 1 - (distance / max_distance)
+                        else:
+                            similarity = 0
+
+                    # 确保相似度在[0, 1]范围内
+                    similarity = max(0, min(1, similarity))
 
                     memory["similarity"] = similarity
                     memory["raw_distance"] = float(distance)
