@@ -793,11 +793,21 @@ class ChatWindow(QMainWindow):
 
             # 添加到记忆
             if hasattr(self, 'memory_manager') and self.memory_manager:
+                # 通知用户正在进行总结 - 使用memory_status而不是thinking_status
+                self.log_to_console("正在总结关键概念，此过程在后台运行...", "info")
+
+                # 更新memory_status文本，而不是发送thinking_status信号
+                self.memory_status.setText("记忆状态: 正在总结关键概念...")
+
+                # 在思考显示区域也添加状态信息
+                self.thinking_display.append(
+                    '<div style="color:#808080;"><i>正在总结关键概念，此过程在后台运行...</i></div>')
+
                 # 打印调试信息
                 print(f"准备添加思考记忆，类别: {category}")
                 print(f"思考内容长度: {len(thought)}")
 
-                # 调用内存管理器添加记忆
+                # 调用内存管理器添加记忆 - 这个过程现在不会卡住界面
                 memory_id = self.memory_manager.add_memory(thought, category)
 
                 if memory_id >= 0:
@@ -805,20 +815,16 @@ class ChatWindow(QMainWindow):
                     self.update_memory_count()
                     self.log_to_console(f"新增思考记忆，ID: {memory_id}, 类别: {category}", "success")
 
-                    # 获取关键句子
-                    key_sentence = ""
-                    if memory_id < len(self.memory_manager.memories):
-                        memory = self.memory_manager.memories[memory_id]
-                        key_sentence = memory.get("key_sentence", "")
-
                     # 显示思考文本摘要
                     thought_summary = thought[:100] + "..." if len(thought) > 100 else thought
                     self.log_to_console(f"思考内容: {thought_summary}", "info")
+                    self.log_to_console("关键概念正在后台生成，将自动更新...", "info")
 
-                    if key_sentence:
-                        self.log_to_console(f"关键句子: {key_sentence}", "info")
+                    # 更新记忆状态
+                    self.memory_status.setText(f"记忆状态: 已添加记忆 #{memory_id}")
                 else:
                     self.log_to_console("记忆存储失败", "error")
+                    self.memory_status.setText("记忆状态: 记忆存储失败")
             else:
                 self.log_to_console("记忆管理器未初始化，无法存储思考", "warning")
 

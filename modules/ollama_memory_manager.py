@@ -66,9 +66,6 @@ class OllamaMemoryManager:
         except Exception as e:
             print(f"保存记忆失败: {e}")
 
-    # In ollama_memory_manager.py
-    # 修改 OllamaMemoryManager 中的 add_memory 方法，确保记忆被正确存储
-
     def add_memory(self, thought, category="general"):
         """添加新的思考记忆，使用Ollama嵌入API，并生成关键句子总结"""
         try:
@@ -77,77 +74,14 @@ class OllamaMemoryManager:
                 print("思考内容为空，跳过存储")
                 return -1
 
-            # 提取关键句子 - 首先尝试使用LLM进行总结
-            key_sentence = ""
-            try:
-                # 使用LLM生成关键句子总结
-                summary_prompt = f"请用一句简洁的话总结以下思考的核心概念(30字以内) \n\n{thought}\n\n总结："
+            # 先创建一个临时记忆，使用思考的前部分作为临时关键句子
+            temp_key_sentence = thought[:100].strip() + "..." if len(thought) > 100 else thought
 
-                # 调用API生成总结 - 使用聊天模型而不是嵌入模型
-                print(f"调用聊天模型 {self.chat_model} 生成关键句子总结")
-                summary_response = self.client.chat_completion(
-                    model=self.chat_model,  # 使用专门的聊天模型
-                    messages=[{"role": "user", "content": summary_prompt}],
-                    stream=False,
-                    temperature=0.3,
-                    max_tokens=50
-                )
+            # 通知用户正在处理关键句子
+            print("正在总结记忆关键概念，请稍候...")
 
-                # 详细记录响应结构以便调试
-                print(f"总结响应类型: {type(summary_response)}")
-                if summary_response:
-                    print(
-                        f"总结响应键: {summary_response.keys() if isinstance(summary_response, dict) else 'Not a dict'}")
-
-                # 检查响应是否有效并提取内容
-                if summary_response and isinstance(summary_response, dict):
-                    if "choices" in summary_response and summary_response["choices"]:
-                        content = summary_response["choices"][0]["message"]["content"].strip()
-                    # Ollama API可能使用不同的响应格式
-                    elif "message" in summary_response and "content" in summary_response["message"]:
-                        content = summary_response["message"]["content"].strip()
-                    else:
-                        print("无法从响应中提取关键句子")
-                        print(f"响应内容: {summary_response}")
-                        content = ""
-
-                    # 提取</think>之后的内容
-                    import re
-                    think_match = re.search(r'</think>(.*?)$', content, re.DOTALL)
-                    if think_match:
-                        key_sentence = think_match.group(1).strip()
-                        print(f"从</think>之后提取的核心概念: {key_sentence}")
-                    else:
-                        # 如果没有</think>标签，就使用完整内容
-                        key_sentence = content
-                        print(f"未找到</think>标签，使用完整内容: {key_sentence}")
-                else:
-                    print("LLM总结返回无效响应")
-                    print(f"响应内容: {summary_response}")
-            except Exception as e:
-                import traceback
-                error_trace = traceback.format_exc()
-                print(f"使用LLM生成关键句子失败: {e}\n{error_trace}")
-
-            # 如果LLM总结失败，回退到简单的提取方法
-            if not key_sentence:
-                print("使用备选方法提取关键句子")
-                # 简单提取第一句话，最多100个字符
-                sentences = thought.split('。')
-                if sentences:
-                    key_sentence = sentences[0].strip()[:100]
-                    if len(key_sentence) == 100:
-                        key_sentence += "..."
-                else:
-                    # 如果无法分句，直接截取开头
-                    key_sentence = thought[:100].strip()
-                    if len(thought) > 100:
-                        key_sentence += "..."
-
-            print(f"最终使用的关键句子: {key_sentence}")
-
-            # 为关键句子生成嵌入向量
-            embedding_response = self.client.create_embedding(key_sentence, self.embedding_model)
+            # 计算嵌入向量（使用临时关键句子）
+            embedding_response = self.client.create_embedding(temp_key_sentence, self.embedding_model)
             if not embedding_response or not embedding_response["data"]:
                 print("获取嵌入向量失败")
                 return -1
@@ -158,16 +92,18 @@ class OllamaMemoryManager:
             if self.index is None:
                 self._initialize_index(len(embedding))
 
-            # 创建记忆条目
+            # 创建临时记忆条目，先使用临时关键句子
             current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            memory_id = len(self.memories)
             memory = {
-                "id": len(self.memories),
+                "id": memory_id,
                 "timestamp": time.time(),
                 "created_at": current_time,
                 "thought": thought,
-                "key_sentence": key_sentence,
+                "key_sentence": temp_key_sentence,  # 临时关键句子
                 "category": category,
-                "embedding": embedding
+                "embedding": embedding,
+                "is_summarized": False  # 标记尚未完成总结
             }
 
             # 添加到记忆列表
@@ -176,16 +112,169 @@ class OllamaMemoryManager:
             # 更新索引
             self.index.add(np.array([embedding], dtype=np.float32))
 
-            # 保存记忆
+            # 保存记忆（临时版本）
             self.save_memories()
 
-            print(f"成功添加记忆 #{memory['id']}, 关键句子: {key_sentence}")
-            return memory["id"]
+            # 启动一个单独的线程来处理关键句子总结
+            import threading
+            summarize_thread = threading.Thread(
+                target=self._summarize_memory_async,
+                args=(memory_id, thought, category)
+            )
+            summarize_thread.daemon = True  # 设为守护线程，防止程序退出时阻塞
+            summarize_thread.start()
+
+            print(f"成功添加记忆 #{memory_id}，关键句子总结正在后台处理中...")
+            return memory_id
         except Exception as e:
             import traceback
             error_trace = traceback.format_exc()
             print(f"添加记忆失败: {e}\n{error_trace}")
             return -1
+
+    def _summarize_memory_async(self, memory_id, thought, category):
+        """异步处理记忆总结"""
+        try:
+            if memory_id >= len(self.memories):
+                print(f"错误：找不到ID为{memory_id}的记忆")
+                return
+
+            print(f"开始为记忆 #{memory_id} 生成关键句子总结...")
+
+            # 使用LLM生成关键句子总结
+            summary_prompt = f"请用一句简洁的话总结以下思考的核心概念(30字以内) \n\n{thought}\n\n总结："
+
+            # 设置超时（避免无限等待）
+            import threading
+            import time
+
+            result = {"key_sentence": "", "success": False, "timeout": False}
+
+            def call_api():
+                try:
+                    # 调用API生成总结 - 使用聊天模型而不是嵌入模型
+                    summary_response = self.client.chat_completion(
+                        model=self.chat_model,
+                        messages=[{"role": "user", "content": summary_prompt}],
+                        stream=False,
+                        temperature=0.3,
+                        max_tokens=50
+                    )
+
+                    if summary_response and isinstance(summary_response, dict):
+                        if "choices" in summary_response and summary_response["choices"]:
+                            content = summary_response["choices"][0]["message"]["content"].strip()
+                        elif "message" in summary_response and "content" in summary_response["message"]:
+                            content = summary_response["message"]["content"].strip()
+                        else:
+                            content = ""
+
+                        # 提取</think>之后的内容
+                        import re
+                        think_match = re.search(r'</think>(.*?)$', content, re.DOTALL)
+                        if think_match:
+                            key_sentence = think_match.group(1).strip()
+                        else:
+                            key_sentence = content
+
+                        result["key_sentence"] = key_sentence
+                        result["success"] = True
+                except Exception as e:
+                    print(f"总结生成错误: {e}")
+                finally:
+                    result["completed"] = True
+
+            # 启动API调用线程
+            api_thread = threading.Thread(target=call_api)
+            api_thread.daemon = True
+            api_thread.start()
+
+            # 等待结果，最多30秒
+            timeout = 30  # 30秒超时
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                if result.get("completed", False):
+                    break
+                time.sleep(0.5)  # 轻微暂停，减少CPU占用
+
+            # 检查是否超时
+            if not result.get("completed", False):
+                result["timeout"] = True
+                print(f"记忆 #{memory_id} 关键句子总结超时")
+
+            # 处理结果
+            key_sentence = result["key_sentence"]
+
+            # 如果总结失败或为空，使用备选方法
+            if not key_sentence or not result["success"] or result["timeout"]:
+                print(f"记忆 #{memory_id} 使用备选方法提取关键句子")
+                # 简单提取第一句话
+                sentences = thought.split('。')
+                if sentences:
+                    key_sentence = sentences[0].strip()[:100]
+                    if len(key_sentence) == 100:
+                        key_sentence += "..."
+                else:
+                    key_sentence = thought[:100].strip()
+                    if len(thought) > 100:
+                        key_sentence += "..."
+
+            # 更新记忆中的关键句子
+            if 0 <= memory_id < len(self.memories):
+                # 为关键句子生成新的嵌入向量
+                print(f"为记忆 #{memory_id} 更新关键句子: {key_sentence}")
+
+                try:
+                    embedding_response = self.client.create_embedding(key_sentence, self.embedding_model)
+                    if embedding_response and embedding_response["data"]:
+                        new_embedding = embedding_response["data"][0]["embedding"]
+
+                        # 从索引中移除旧的嵌入
+                        if self.index is not None:
+                            # FAISS不支持直接删除，所以我们需要重建索引
+                            self._rebuild_index_without(memory_id)
+
+                        # 更新记忆
+                        self.memories[memory_id]["key_sentence"] = key_sentence
+                        self.memories[memory_id]["embedding"] = new_embedding
+                        self.memories[memory_id]["is_summarized"] = True
+
+                        # 添加更新后的嵌入到索引
+                        if self.index is not None:
+                            self.index.add(np.array([new_embedding], dtype=np.float32))
+
+                        # 保存更新后的记忆
+                        self.save_memories()
+                        print(f"记忆 #{memory_id} 关键句子总结已完成并更新")
+                    else:
+                        print(f"记忆 #{memory_id} 更新嵌入向量失败")
+                except Exception as e:
+                    print(f"更新记忆 #{memory_id} 嵌入向量时出错: {e}")
+
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"异步总结记忆失败: {e}\n{error_trace}")
+
+    def _rebuild_index_without(self, exclude_id):
+        """重建索引，排除指定ID的记忆"""
+        if self.index is None or self.dimension is None:
+            return
+
+        # 创建新索引
+        new_index = faiss.IndexFlatL2(self.dimension)
+
+        # 添加除了exclude_id之外的所有嵌入
+        embeddings = []
+        for i, memory in enumerate(self.memories):
+            if i != exclude_id:
+                embeddings.append(np.array(memory["embedding"], dtype=np.float32))
+
+        if embeddings:
+            new_index.add(np.array(embeddings))
+
+        # 更新索引
+        self.index = new_index
 
     def get_content_based_similarity(self, query, memory_text):
         """使用关键词匹配增强相似度评估"""

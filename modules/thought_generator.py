@@ -153,12 +153,18 @@ class ThoughtGenerator(QThread):
 
                 # 思考完成后，确保内容非空
                 if not self._stop and self.current_thought and len(self.current_thought.strip()) > 50:
+                    # 发送提示信息
+                    self.thinking_status.emit("思考已完成，正在总结关键概念...")
+
                     # 发送完整思考结果
                     self.thought_complete_signal.emit(self.current_thought, category)
+
                     # 更新最后思考时间
                     self.last_thought_time = time.time()
+
                     # 增加迭代计数
                     iteration += 1
+
                     # 随机暂停一段时间
                     pause_time = random.uniform(15, 30)
                     self.thinking_status.emit(f"思考已完成，休息 {pause_time:.1f} 秒...")
@@ -167,7 +173,6 @@ class ThoughtGenerator(QThread):
                     # 如果思考结果为空或过短，暂停短时间后重试
                     self.thinking_status.emit("思考结果不理想，准备重新思考...")
                     time.sleep(3)
-
             except Exception as e:
                 import traceback
                 error_trace = traceback.format_exc()
