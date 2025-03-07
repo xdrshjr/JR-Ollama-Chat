@@ -1,6 +1,7 @@
 import json
 import time
 import requests
+import numpy as np
 
 
 class OllamaClient:
@@ -101,3 +102,50 @@ class OllamaClient:
         except requests.exceptions.RequestException as e:
             print(f"流式请求错误: {e}")
             yield None
+
+    def create_embedding(self, text, model="nomic-embed-text"):
+        """
+        使用Ollama的嵌入API创建文本嵌入
+        支持单个文本或文本列表
+        """
+        url = f"{self.base_url}/api/embeddings"
+
+        if isinstance(text, list):
+            # 批量处理多个文本
+            embeddings = []
+            for t in text:
+                emb = self._get_single_embedding(t, model, url)
+                if emb is not None:
+                    embeddings.append(emb)
+            return {
+                "data": [{"embedding": e, "index": i} for i, e in enumerate(embeddings)],
+                "model": model
+            }
+        else:
+            # 处理单个文本
+            embedding = self._get_single_embedding(text, model, url)
+            if embedding is not None:
+                return {
+                    "data": [{"embedding": embedding, "index": 0}],
+                    "model": model
+                }
+            return None
+
+    def _get_single_embedding(self, text, model, url):
+        """获取单个文本的嵌入向量"""
+        payload = {
+            "model": model,
+            "prompt": text,
+        }
+
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            result = response.json()
+
+            # 返回嵌入向量
+            embedding = result.get("embedding", [])
+            return embedding
+        except Exception as e:
+            print(f"获取嵌入向量失败: {e}")
+            return None

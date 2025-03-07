@@ -4,13 +4,17 @@ import sys
 import json
 import time
 import requests
+from langchain.vectorstores import faiss
+
+from modules.ollama_memory_manager import OllamaMemoryManager
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTextEdit, QLineEdit,
                              QPushButton, QVBoxLayout, QHBoxLayout, QWidget,
-                             QLabel, QComboBox, QSlider, QSplitter)
+                             QLabel, QComboBox, QSlider, QSplitter, QCheckBox)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QFont, QTextCursor, QIcon
 
 from modules.ollama_client import OllamaClient
+from modules.thought_generator import ThoughtGenerator
 
 
 def resource_path(relative_path):
@@ -93,6 +97,14 @@ class ChatWindow(QMainWindow):
         self.model_combo.addItems(["qwq:latest", "llama3", "mixtral", "phi3"])
         settings_layout.addWidget(self.model_combo)
 
+        # 嵌入模型选择
+        settings_layout.addWidget(QLabel("嵌入模型:"))
+        self.embed_model_combo = QComboBox()
+        self.embed_model_combo.addItems(["nomic-embed-text"])
+        self.embed_model_combo.setCurrentIndex(0)
+        settings_layout.addWidget(self.embed_model_combo)
+        self.embed_model_combo.currentTextChanged.connect(self.update_embedding_model)
+
         # 温度
         settings_layout.addWidget(QLabel("温度:"))
         self.temp_slider = QSlider(Qt.Horizontal)
@@ -112,6 +124,33 @@ class ChatWindow(QMainWindow):
         settings_layout.addWidget(self.token_combo)
 
         main_layout.addLayout(settings_layout)
+
+        # 添加记忆功能控制部分
+        memory_layout = QHBoxLayout()
+
+        self.use_memory_cb = QCheckBox("使用记忆")
+        self.use_memory_cb.setChecked(False)
+        self.use_memory_cb.setStyleSheet("color: #e0e0e0;")
+        memory_layout.addWidget(self.use_memory_cb)
+
+        self.memory_status = QLabel("记忆状态: 空闲")
+        self.memory_status.setStyleSheet("color: #e0e0e0;")
+        memory_layout.addWidget(self.memory_status)
+
+        self.start_thinking_btn = QPushButton("开始自我思考")
+        self.start_thinking_btn.clicked.connect(self.toggle_thinking)
+        memory_layout.addWidget(self.start_thinking_btn)
+
+        self.memory_count = QLabel("记忆数量: 0")
+        self.memory_count.setStyleSheet("color: #e0e0e0;")
+        memory_layout.addWidget(self.memory_count)
+
+        # 删除所有记忆按钮
+        self.clear_memory_btn = QPushButton("清空所有记忆")
+        self.clear_memory_btn.clicked.connect(self.clear_all_memories)
+        memory_layout.addWidget(self.clear_memory_btn)
+
+        main_layout.addLayout(memory_layout)
 
         # 创建聊天窗口和输入区域的垂直布局
         chat_input_layout = QVBoxLayout()
@@ -235,7 +274,182 @@ class ChatWindow(QMainWindow):
                 font-family: 'Segoe UI', Arial, sans-serif;
                 color: #c0c0c0;
             }
+            QCheckBox {
+                color: #e0e0e0;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 1px solid #4a90e2;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #4a90e2;
+            }
         """)
+
+    # 添加新的清除所有记忆方法
+    def clear_all_memories(self):
+        """清空所有存储的记忆"""
+        if hasattr(self, 'memory_manager'):
+            self.memory_manager.memories = []
+            if self.memory_manager.index is not None:
+                # 保持索引维度，但清空内容
+                dimension = self.memory_manager.dimension
+                self.memory_manager.index = faiss.IndexFlatL2(dimension)
+            self.memory_manager.save_memories()
+            self.update_memory_count()
+            self.chat_history.append('<div style="color:#808080;"><i>--- 所有记忆已清除 ---</i></div>')
+
+    def update_embedding_model(self, model_name):
+        """当嵌入模型改变时更新记忆管理器"""
+        if hasattr(self, 'memory_manager'):
+            self.memory_manager.embedding_model = model_name
+            self.chat_history.append(f'<div style="color:#808080;"><i>--- 嵌入模型已更改为: {model_name} ---</i></div>')
+
+    def update_memory_count(self):
+        """更新记忆数量显示"""
+        try:
+            if hasattr(self, 'memory_manager') and self.memory_manager:
+                count = len(self.memory_manager.memories)
+                self.memory_count.setText(f"记忆数量: {count}")
+            else:
+                self.memory_count.setText("记忆数量: 0")
+        except Exception as e:
+            print(f"更新记忆数量出错: {str(e)}")
+
+    def toggle_thinking(self):
+        """切换思考状态"""
+        try:
+            if not hasattr(self, 'is_thinking'):
+                self.is_thinking = False
+
+            if not self.is_thinking:
+                # 检查必要组件是否初始化
+                if not hasattr(self, 'memory_manager') or self.memory_manager is None:
+                    print("初始化内存管理器...")
+                    self.memory_manager = OllamaMemoryManager(self.client)
+
+                if not hasattr(self, 'memory_retriever') or self.memory_retriever is None:
+                    print("初始化内存检索器...")
+                    from modules.memory_retriever import MemoryRetriever
+                    self.memory_retriever = MemoryRetriever(self.memory_manager)
+
+                # 开始思考
+                print("开始启动思考生成器...")
+                model = self.model_combo.currentText()
+                self.thought_generator = ThoughtGenerator(self.client, model)
+                self.thought_generator.thought_generated.connect(self.on_thought_generated)
+                self.thought_generator.thinking_status.connect(self.update_thinking_status)
+
+                print("启动思考线程...")
+                self.thought_generator.start()
+
+                self.is_thinking = True
+                self.start_thinking_btn.setText("停止思考")
+                self.memory_status.setText("记忆状态: 正在思考...")
+                print("思考已开始")
+            else:
+                # 停止思考
+                print("准备停止思考...")
+                if hasattr(self, 'thought_generator') and self.thought_generator:
+                    self.thought_generator.stop()
+                    self.thought_generator = None
+
+                self.is_thinking = False
+                self.start_thinking_btn.setText("开始自我思考")
+                self.memory_status.setText("记忆状态: 空闲")
+                print("思考已停止")
+        except Exception as e:
+            import traceback
+            error_msg = f"思考过程出错: {str(e)}\n{traceback.format_exc()}"
+            print(error_msg)
+            self.chat_history.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
+
+    def update_thinking_status(self, status):
+        """更新思考状态"""
+        self.memory_status.setText(f"记忆状态: {status}")
+
+    def on_thought_generated(self, thought, category):
+        """处理生成的思考内容"""
+        try:
+            print(f"收到新思考: {category}")
+            # 确保memory_manager已初始化
+            if not hasattr(self, 'memory_manager') or self.memory_manager is None:
+                self.memory_manager = OllamaMemoryManager(self.client)
+
+            # 添加到记忆
+            self.memory_manager.add_memory(thought, category)
+
+            # 更新记忆计数
+            self.update_memory_count()
+
+            # 可选: 在聊天历史中显示思考内容
+            self.chat_history.append(
+                f'<div style="color:#808080;"><i>--- 新思考已生成 (类别: {category}) ---</i></div>')
+        except Exception as e:
+            import traceback
+            error_msg = f"处理思考内容出错: {str(e)}\n{traceback.format_exc()}"
+            print(error_msg)
+            self.chat_history.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
+
+    # 修改 send_message 方法，添加记忆检索功能:
+
+    def send_message(self):
+        user_text = self.user_input.toPlainText().strip()
+        if not user_text:
+            return
+
+        # 更新服务器地址
+        self.client.base_url = self.server_input.text().strip()
+
+        # 添加用户消息到历史
+        self.chat_history.append(f'<div style="color:#7ebeff;"><b>你:</b> {user_text}</div>')
+
+        # 检查是否使用记忆
+        if self.use_memory_cb.isChecked() and self.memory_manager.memories:
+            # 使用记忆增强提示
+            enhanced_query, memories = self.memory_retriever.enhance_prompt_with_memories(user_text)
+
+            # 如果找到了相关记忆，在聊天历史中显示
+            if memories:
+                memory_info = f"已找到 {len(memories)} 条相关记忆"
+                self.chat_history.append(f'<div style="color:#808080;"><i>--- {memory_info} ---</i></div>')
+
+            # 使用增强后的查询
+            self.messages.append({"role": "user", "content": enhanced_query})
+        else:
+            # 不使用记忆，直接添加原始消息
+            self.messages.append({"role": "user", "content": user_text})
+
+        # 清空输入框
+        self.user_input.clear()
+
+        # 显示思考中
+        self.chat_history.append('<div style="color:#e0e0e0;"><b>AI助手:</b> </div>')
+        self.current_response = ""
+
+        # 准备参数
+        model = self.model_combo.currentText()
+        temperature = self.temp_slider.value() / 100
+        max_tokens = int(self.token_combo.currentText())
+
+        # 启动线程处理请求
+        self.chat_thread = ChatThread(
+            self.client,
+            model,
+            self.messages.copy(),
+            temperature,
+            max_tokens
+        )
+        self.chat_thread.response_signal.connect(self.update_response)
+        self.chat_thread.finished_signal.connect(self.complete_response)
+        self.chat_thread.start()
+
+        # 启用暂停按钮
+        self.stop_button.setText("暂停")
+        self.stop_button.setEnabled(True)
 
     def clear_context(self):
         # 只保留系统提示，不清空聊天界面
