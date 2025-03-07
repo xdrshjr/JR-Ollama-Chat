@@ -6,9 +6,29 @@ from PyQt5.QtWidgets import QApplication, QMessageBox
 from modules.chat_window import ChatWindow
 
 
+def exception_hook(exctype, value, traceback):
+    """全局异常处理函数"""
+    error_msg = f"未捕获的异常: {exctype.__name__}: {value}"
+    print(error_msg)
+
+    # 尝试将错误写入日志文件
+    try:
+        with open("error_log.txt", "a") as f:
+            import datetime
+            f.write(f"[{datetime.datetime.now()}] {error_msg}\n")
+            import traceback as tb
+            tb.print_exception(exctype, value, traceback, file=f)
+    except:
+        pass
+
+    # 调用原始的异常处理器
+    sys.__excepthook__(exctype, value, traceback)
+
+
 def main():
     app = QApplication(sys.argv)
-
+    # 设置全局异常处理器
+    sys.excepthook = exception_hook
     try:
         window = ChatWindow()
         window.show()

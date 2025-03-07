@@ -148,7 +148,7 @@ class OllamaMemoryManager:
             import threading
             import time
 
-            result = {"key_sentence": "", "success": False, "timeout": False}
+            result = {"key_sentence": "", "success": False, "timeout": False, "completed": False}
 
             def call_api():
                 try:
@@ -184,29 +184,41 @@ class OllamaMemoryManager:
                 finally:
                     result["completed"] = True
 
-            # 启动API调用线程
+            # 创建但不立即启动线程
             api_thread = threading.Thread(target=call_api)
             api_thread.daemon = True
-            api_thread.start()
 
-            # 等待结果，最多30秒
-            timeout = 30  # 30秒超时
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                if result.get("completed", False):
-                    break
-                time.sleep(0.5)  # 轻微暂停，减少CPU占用
+            try:
+                # 启动API调用线程
+                api_thread.start()
 
-            # 检查是否超时
+                # 等待结果，最多30秒
+                timeout = 30  # 30秒超时
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    if result.get("completed", False):
+                        break
+                    time.sleep(0.5)  # 轻微暂停，减少CPU占用
+
+                # 检查是否超时
+                if not result.get("completed", False):
+                    result["timeout"] = True
+                    print(f"记忆 #{memory_id} 关键句子总结超时")
+            except Exception as e:
+                print(f"API线程异常: {e}")
+                result["success"] = False
+
+            # 确保线程已完成或超时
             if not result.get("completed", False):
+                print("强制标记API线程已完成")
+                result["completed"] = True
                 result["timeout"] = True
-                print(f"记忆 #{memory_id} 关键句子总结超时")
 
             # 处理结果
-            key_sentence = result["key_sentence"]
+            key_sentence = result.get("key_sentence", "")
 
             # 如果总结失败或为空，使用备选方法
-            if not key_sentence or not result["success"] or result["timeout"]:
+            if not key_sentence or not result.get("success", False) or result.get("timeout", False):
                 print(f"记忆 #{memory_id} 使用备选方法提取关键句子")
                 # 简单提取第一句话
                 sentences = thought.split('。')
@@ -220,36 +232,41 @@ class OllamaMemoryManager:
                         key_sentence += "..."
 
             # 更新记忆中的关键句子
-            if 0 <= memory_id < len(self.memories):
-                # 为关键句子生成新的嵌入向量
-                print(f"为记忆 #{memory_id} 更新关键句子: {key_sentence}")
+            try:
+                if 0 <= memory_id < len(self.memories):
+                    # 为关键句子生成新的嵌入向量
+                    print(f"为记忆 #{memory_id} 更新关键句子: {key_sentence}")
 
-                try:
-                    embedding_response = self.client.create_embedding(key_sentence, self.embedding_model)
-                    if embedding_response and embedding_response["data"]:
-                        new_embedding = embedding_response["data"][0]["embedding"]
+                    try:
+                        embedding_response = self.client.create_embedding(key_sentence, self.embedding_model)
+                        if embedding_response and embedding_response["data"]:
+                            new_embedding = embedding_response["data"][0]["embedding"]
 
-                        # 从索引中移除旧的嵌入
-                        if self.index is not None:
-                            # FAISS不支持直接删除，所以我们需要重建索引
-                            self._rebuild_index_without(memory_id)
+                            # 从索引中移除旧的嵌入
+                            if self.index is not None:
+                                # FAISS不支持直接删除，所以我们需要重建索引
+                                self._rebuild_index_without(memory_id)
 
-                        # 更新记忆
-                        self.memories[memory_id]["key_sentence"] = key_sentence
-                        self.memories[memory_id]["embedding"] = new_embedding
-                        self.memories[memory_id]["is_summarized"] = True
+                            # 更新记忆
+                            self.memories[memory_id]["key_sentence"] = key_sentence
+                            self.memories[memory_id]["embedding"] = new_embedding
+                            self.memories[memory_id]["is_summarized"] = True
 
-                        # 添加更新后的嵌入到索引
-                        if self.index is not None:
-                            self.index.add(np.array([new_embedding], dtype=np.float32))
+                            # 添加更新后的嵌入到索引
+                            if self.index is not None:
+                                self.index.add(np.array([new_embedding], dtype=np.float32))
 
-                        # 保存更新后的记忆
-                        self.save_memories()
-                        print(f"记忆 #{memory_id} 关键句子总结已完成并更新")
-                    else:
-                        print(f"记忆 #{memory_id} 更新嵌入向量失败")
-                except Exception as e:
-                    print(f"更新记忆 #{memory_id} 嵌入向量时出错: {e}")
+                            # 保存更新后的记忆
+                            self.save_memories()
+                            print(f"记忆 #{memory_id} 关键句子总结已完成并更新")
+                        else:
+                            print(f"记忆 #{memory_id} 更新嵌入向量失败")
+                    except Exception as e:
+                        print(f"更新记忆 #{memory_id} 嵌入向量时出错: {e}")
+                else:
+                    print(f"记忆ID {memory_id} 超出范围，无法更新")
+            except Exception as e:
+                print(f"更新记忆数据时出错: {e}")
 
         except Exception as e:
             import traceback

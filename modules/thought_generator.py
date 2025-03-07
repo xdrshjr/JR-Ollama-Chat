@@ -100,6 +100,27 @@ class ThoughtGenerator(QThread):
             topic = random.choice(self.initial_topics)
             return topic, category, latest_memory["id"]
 
+    def stop(self):
+        """安全地停止思考线程"""
+        print("请求停止思考线程...")
+        self._stop = True
+
+        # 等待1秒钟看线程是否会自然终止
+        for _ in range(10):
+            if not self.isRunning():
+                print("思考线程已自然终止")
+                return
+            time.sleep(0.1)
+
+        # 如果线程仍在运行，发送一个状态更新
+        if self.isRunning():
+            try:
+                self.thinking_status.emit("思考被用户中断")
+            except:
+                print("无法发送思考状态更新")
+
+        print("思考线程停止请求完成")
+
     def run(self):
         """执行迭代思考过程"""
         iteration = 0

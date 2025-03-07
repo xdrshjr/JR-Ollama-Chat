@@ -463,17 +463,30 @@ class ChatWindow(QMainWindow):
         """在窗口关闭时处理线程终止"""
         print("正在关闭窗口，清理线程...")
 
+        # 禁用UI，防止用户在关闭过程中进行交互
+        self.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+
         # 停止思考线程
         if hasattr(self, 'thought_generator') and self.thought_generator:
             print("正在停止思考线程...")
             self.thought_generator._stop = True
-            self.thought_generator.wait(1000)
+
+            # 等待最多2秒让线程终止
+            if not self.thought_generator.wait(2000):
+                print("思考线程未能正常终止，强制继续关闭")
 
         # 停止聊天线程
         if hasattr(self, 'chat_thread') and self.chat_thread and self.chat_thread.isRunning():
             print("正在停止聊天线程...")
             self.chat_thread._stop = True
-            self.chat_thread.wait(1000)
+
+            # 等待最多2秒让线程终止
+            if not self.chat_thread.wait(2000):
+                print("聊天线程未能正常终止，强制继续关闭")
+
+        # 恢复光标
+        QApplication.restoreOverrideCursor()
 
         print("所有线程已停止，窗口即将关闭")
         event.accept()
@@ -706,18 +719,28 @@ class ChatWindow(QMainWindow):
             # 获取当前勾选状态
             is_checked = self.thinking_toggle.isChecked()
 
+            # 禁用按钮，防止用户重复点击
+            self.thinking_toggle.setEnabled(False)
+
             if is_checked:
                 # 启动思考
+                self.log_to_console("正在启动思考进程...", "info")
                 self.start_thinking()
             else:
                 # 停止思考
+                self.log_to_console("正在停止思考进程...", "info")
                 self.stop_thinking()
 
         except Exception as e:
             import traceback
-            error_msg = f"思考过程出错: {str(e)}\n{traceback.format_exc()}"
+            error_msg = f"思考过程切换出错: {str(e)}\n{traceback.format_exc()}"
             print(error_msg)
             self.chat_history.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
+            # 出错时重置勾选状态
+            self.thinking_toggle.setChecked(False)
+        finally:
+            # 重新启用按钮
+            self.thinking_toggle.setEnabled(True)
 
     # In chat_window.py, modify the start_thinking method
     def start_thinking(self):
@@ -939,19 +962,39 @@ class ChatWindow(QMainWindow):
         was_thinking = False
         if self.is_thinking and hasattr(self, 'thought_generator') and self.thought_generator:
             was_thinking = True
-            self.thought_generator.stop()  # 使用正确的stop方法
+            # 更新状态提示
+            self.memory_status.setText("记忆状态: 正在停止思考...")
+            self.log_to_console("正在停止思考线程以处理用户问题...", "warning")
 
-            # 等待线程完全停止
-            if self.thought_generator.isRunning():
-                self.thought_generator.wait(1000)  # 最多等待1秒
+            # 标记停止思考
+            self.thought_generator._stop = True
 
-            self.thought_generator = None
-            self.is_thinking = False
-            self.memory_status.setText("记忆状态: 暂停思考，正在回答问题...")
-            self.thinking_display.append('<div style="color:#e07a7a;"><i>思考已暂停，正在回答问题...</i></div>')
-            # 给线程一点时间完全终止
+            # 避免在后台立即重启思考
+            self.thinking_toggle.setChecked(False)
+
+            # 使UI暂时不响应，避免用户重复点击
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+
+            try:
+                # 等待线程完全停止，最多等3秒
+                if not self.thought_generator.wait(3000):
+                    # 如果3秒后线程仍未停止，记录警告
+                    self.log_to_console("思考线程停止超时，强制继续...", "error")
+
+                # 强制清理思考线程
+                self.thought_generator = None
+                self.is_thinking = False
+                self.memory_status.setText("记忆状态: 已停止思考，正在回答问题...")
+                self.thinking_display.append('<div style="color:#e07a7a;"><i>思考已强制停止，正在回答问题...</i></div>')
+            finally:
+                # 恢复正常光标
+                QApplication.restoreOverrideCursor()
+
+            # 确保事件循环处理已生成的事件
             QApplication.processEvents()
-            time.sleep(0.5)  # 短暂暂停确保资源释放
+
+            # 短暂暂停确保资源释放
+            time.sleep(0.2)
 
         # 更新服务器地址
         self.client.base_url = self.server_input.text().strip()
@@ -1049,20 +1092,26 @@ class ChatWindow(QMainWindow):
         max_tokens = int(self.token_combo.currentText())
 
         # 启动线程处理请求
-        self.chat_thread = ChatThread(
-            self.client,
-            model,
-            self.messages.copy(),
-            temperature,
-            max_tokens
-        )
-        self.chat_thread.response_signal.connect(self.update_response)
-        self.chat_thread.finished_signal.connect(lambda: self.complete_response(was_thinking))
-        self.chat_thread.start()
+        try:
+            self.chat_thread = ChatThread(
+                self.client,
+                model,
+                self.messages.copy(),
+                temperature,
+                max_tokens
+            )
+            self.chat_thread.response_signal.connect(self.update_response)
+            self.chat_thread.finished_signal.connect(lambda: self.complete_response(was_thinking))
+            self.chat_thread.start()
 
-        # 启用暂停按钮
-        self.stop_button.setText("暂停")
-        self.stop_button.setEnabled(True)
+            # 启用暂停按钮
+            self.stop_button.setText("暂停")
+            self.stop_button.setEnabled(True)
+        except Exception as e:
+            import traceback
+            error_msg = f"启动聊天线程时出错: {str(e)}\n{traceback.format_exc()}"
+            self.log_to_console(error_msg, "error")
+            self.chat_history.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
 
     def clear_context(self):
         # 只保留系统提示，不清空聊天界面
