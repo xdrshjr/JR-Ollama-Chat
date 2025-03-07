@@ -1,3 +1,4 @@
+import math
 import os
 import json
 import time
@@ -127,16 +128,45 @@ class OllamaMemoryManager:
             distances, indices = self.index.search(np.array([query_embedding], dtype=np.float32),
                                                    min(top_k, len(self.memories)))
 
+            # 打印原始距离值用于调试
+            print(f"原始FAISS距离值: {distances[0]}")
+
             # 返回结果
             results = []
             for i, idx in enumerate(indices[0]):
                 if idx < len(self.memories) and idx >= 0:
                     memory = self.memories[idx].copy()
-                    memory["similarity"] = float(1 - min(distances[0][i], 10) / 10)  # 归一化相似度，限制在0-1之间
+
+                    # 获取原始距离
+                    distance = distances[0][i]
+
+                    # 查看我们使用的是哪种FAISS索引类型
+                    if hasattr(self, 'index_type') and self.index_type == 'cosine':
+                        # 对于余弦相似度：距离 = 1 - 相似度，所以相似度 = 1 - 距离
+                        similarity = 1.0 - distance
+                    elif hasattr(self, 'index_type') and self.index_type == 'ip':
+                        # 对于内积，较大值表示更相似，但需要归一化
+                        # 假设最大可能内积为理论最大值1.0
+                        similarity = max(0.0, min(1.0, distance))
+                    else:
+                        # 对于欧几里得距离 (L2)，使用更合适的映射函数
+                        scaling_factor = 0.01  # 可以根据实际距离分布调整
+                        similarity = float(math.exp(-distance * scaling_factor)) * 100
+
+                    # 确保相似度在有效范围内
+                    similarity = max(0.0, min(1.0, similarity))
+
+                    # 设置相似度，并保留原始距离以供调试
+                    memory["similarity"] = similarity
+                    memory["raw_distance"] = float(distance)
                     memory.pop("embedding", None)  # 移除嵌入向量以减小数据量
                     results.append(memory)
 
+            # 按相似度从高到低排序
+            results.sort(key=lambda x: x["similarity"], reverse=True)
             return results
         except Exception as e:
-            print(f"搜索记忆失败: {e}")
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"搜索记忆失败: {e}\n{error_trace}")
             return []

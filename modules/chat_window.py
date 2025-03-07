@@ -157,6 +157,11 @@ class ChatWindow(QMainWindow):
         memory_layout.addWidget(self.similarity_threshold_label)
         self.similarity_threshold_slider.valueChanged.connect(self.update_similarity_threshold_label)
 
+        # 在initUI的记忆布局中添加
+        self.memory_stats_btn = QPushButton("记忆统计")
+        self.memory_stats_btn.clicked.connect(self.show_memory_statistics)
+        memory_layout.addWidget(self.memory_stats_btn)
+
         # 删除所有记忆按钮
         self.clear_memory_btn = QPushButton("清空所有记忆")
         self.clear_memory_btn.clicked.connect(self.clear_all_memories)
@@ -337,6 +342,10 @@ class ChatWindow(QMainWindow):
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
 
+        # 主窗口样式表
+        self.set_background_styleSheet()
+
+    def set_background_styleSheet(self):
         # 设置样式表 - 修改为更深的灰黑色主题
         self.setStyleSheet("""
             QMainWindow, QWidget {
@@ -507,6 +516,8 @@ class ChatWindow(QMainWindow):
         """处理记忆使用选项的开关"""
         try:
             if state == Qt.Checked:  # 如果勾选了使用记忆
+                self.log_to_console("正在启用记忆功能...", "info")
+
                 # 初始化记忆管理器（如果尚未初始化）
                 if not hasattr(self, 'memory_manager') or self.memory_manager is None:
                     self.memory_manager = OllamaMemoryManager(self.client)
@@ -518,6 +529,7 @@ class ChatWindow(QMainWindow):
                     # 更新嵌入模型
                     current_embed_model = self.embed_model_combo.currentText()
                     self.memory_manager.embedding_model = current_embed_model
+                    self.log_to_console(f"使用嵌入模型: {current_embed_model}", "info")
 
                     # 更新记忆数量显示
                     self.update_memory_count()
@@ -526,22 +538,167 @@ class ChatWindow(QMainWindow):
                     if memory_count > 0:
                         self.chat_history.append(
                             f'<div style="color:#808080;"><i>--- 已加载 {memory_count} 条记忆 ---</i></div>')
+                        self.log_to_console(f"成功加载 {memory_count} 条记忆", "success")
+
+                        # 打印记忆列表和关键词
+                        self.log_to_console("--- 记忆列表 ---", "info")
+
+                        # 导入所需模块
+                        from sklearn.feature_extraction.text import TfidfVectorizer
+                        import numpy as np
+                        import re
+
+                        # 使用TF-IDF提取关键词
+                        def extract_keywords(text, top_n=5):
+                            # 简单清洗文本
+                            text = re.sub(r'[^\w\s]', '', text)
+                            words = text.split()
+
+                            # 如果文本太短，直接返回前几个词
+                            if len(words) <= top_n:
+                                return words
+
+                            # 否则使用TF-IDF
+                            try:
+                                vectorizer = TfidfVectorizer(max_features=50, stop_words='english')
+                                tfidf_matrix = vectorizer.fit_transform([text])
+                                feature_names = vectorizer.get_feature_names_out()
+
+                                # 获取词语重要性分数
+                                dense = tfidf_matrix.todense()
+                                scores = np.asarray(dense)[0]
+
+                                # 创建词-分数对并排序
+                                word_scores = [(word, scores[idx]) for idx, word in enumerate(feature_names)]
+                                word_scores.sort(key=lambda x: x[1], reverse=True)
+
+                                # 返回前top_n个关键词
+                                return [word for word, score in word_scores[:top_n]]
+                            except:
+                                # 如果TF-IDF失败，回退到简单方法
+                                return words[:top_n]
+
+                        # 遍历显示记忆及其关键词
+                        for idx, memory in enumerate(self.memory_manager.memories):
+                            memory_id = memory.get('id', f'mem_{idx}')
+                            category = memory.get('category', '未分类')
+                            thought = memory.get('thought', '')
+                            created_at = memory.get('created_at', '未知时间')
+
+                            # 提取关键词
+                            keywords = extract_keywords(thought)
+                            keywords_str = ", ".join(keywords)
+
+                            # 准备摘要文本（太长的话截断）
+                            summary = thought[:80] + "..." if len(thought) > 80 else thought
+
+                            # 记录到控制台
+                            log_entry = (f"记忆 #{idx + 1} [{memory_id}] - 类别: {category}, "
+                                         f"时间: {created_at}\n"
+                                         f"关键词: {keywords_str}\n"
+                                         f"摘要: {summary}")
+                            self.log_to_console(log_entry, "info")
+
+                            # 每3条记忆后添加一个分隔符，提高可读性
+                            if (idx + 1) % 3 == 0 and idx < len(self.memory_manager.memories) - 1:
+                                self.log_to_console("---", "info")
                     else:
                         self.chat_history.append(
                             '<div style="color:#808080;"><i>--- 没有找到已存储的记忆 ---</i></div>')
+                        self.log_to_console("没有找到已存储的记忆", "warning")
 
                 self.memory_status.setText(f"记忆状态: 已启用 ({len(self.memory_manager.memories)} 条)")
+                self.log_to_console("记忆功能已启用", "success")
             else:
                 # 禁用记忆使用（但不删除记忆）
                 self.memory_status.setText("记忆状态: 已禁用")
                 self.chat_history.append('<div style="color:#808080;"><i>--- 记忆功能已禁用 ---</i></div>')
+                self.log_to_console("记忆功能已禁用", "warning")
         except Exception as e:
             import traceback
             error_msg = f"切换记忆状态出错: {str(e)}\n{traceback.format_exc()}"
             print(error_msg)
             self.chat_history.append(f'<div style="color:red;"><b>错误:</b> {error_msg}</div>')
+            self.log_to_console(f"记忆功能出错: {str(e)}", "error")
             # 出错时取消勾选
             self.use_memory_cb.setChecked(False)
+
+    def show_memory_statistics(self):
+        """显示记忆统计信息"""
+        try:
+            if not hasattr(self, 'memory_manager') or not self.memory_manager or not self.memory_manager.memories:
+                self.log_to_console("没有可用的记忆进行统计", "warning")
+                return
+
+            memories = self.memory_manager.memories
+            total_memories = len(memories)
+
+            # 按类别统计
+            categories = {}
+            for memory in memories:
+                cat = memory.get('category', '未分类')
+                if cat in categories:
+                    categories[cat] += 1
+                else:
+                    categories[cat] = 1
+
+            # 按时间统计
+            import datetime
+            time_periods = {
+                '今天': 0,
+                '昨天': 0,
+                '本周': 0,
+                '本月': 0,
+                '更早': 0
+            }
+
+            today = datetime.datetime.now().date()
+            yesterday = today - datetime.timedelta(days=1)
+            week_start = today - datetime.timedelta(days=today.weekday())
+            month_start = datetime.datetime(today.year, today.month, 1).date()
+
+            for memory in memories:
+                if 'created_at' in memory:
+                    try:
+                        # 假设格式为 "YYYY-MM-DD HH:MM:SS"
+                        time_str = memory['created_at']
+                        memory_time = datetime.datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S").date()
+
+                        if memory_time == today:
+                            time_periods['今天'] += 1
+                        elif memory_time == yesterday:
+                            time_periods['昨天'] += 1
+                        elif memory_time >= week_start:
+                            time_periods['本周'] += 1
+                        elif memory_time >= month_start:
+                            time_periods['本月'] += 1
+                        else:
+                            time_periods['更早'] += 1
+                    except:
+                        time_periods['未知'] = time_periods.get('未知', 0) + 1
+
+            # 记录统计结果
+            self.log_to_console(f"--- 记忆统计 (共 {total_memories} 条) ---", "success")
+
+            # 类别统计
+            self.log_to_console("按类别统计:", "info")
+            for category, count in sorted(categories.items(), key=lambda x: x[1], reverse=True):
+                percentage = (count / total_memories) * 100
+                self.log_to_console(f"  - {category}: {count}条 ({percentage:.1f}%)", "info")
+
+            # 时间统计
+            self.log_to_console("按时间统计:", "info")
+            for period, count in time_periods.items():
+                if count > 0:
+                    percentage = (count / total_memories) * 100
+                    self.log_to_console(f"  - {period}: {count}条 ({percentage:.1f}%)", "info")
+
+            self.log_to_console("--- 统计完成 ---", "success")
+
+        except Exception as e:
+            import traceback
+            error_msg = f"生成记忆统计出错: {str(e)}\n{traceback.format_exc()}"
+            self.log_to_
 
     def toggle_thinking(self):
         """切换思考状态"""
